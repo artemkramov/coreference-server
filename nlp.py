@@ -2,6 +2,8 @@ import subprocess
 import threading
 import os
 import re
+import uuid
+from word import Word
 
 ENCODING = 'utf-8'
 
@@ -95,3 +97,34 @@ def extract_entities(text, ner):
         "entities": entities
     }
     return summary
+
+def parse_tag(tagString):
+    b = 5
+
+
+def save_token(word, tag, word_order, entity_id, coreference_group_id, document_id):
+    token = Word()
+    token.RawText = word
+    token.DocumentID = document_id
+    token.WordOrder = word_order
+
+
+
+def save_tokens(entities):
+    word_order = 0
+    cluster_groups = {}
+    document_id = uuid.uuid4()
+    for entity in entities:
+        cluster_id = None
+        if not (entity.clusterID is None):
+            if not (entity.clusterID in cluster_groups):
+                cluster_groups[entity.clusterID] = uuid.uuid4()
+            cluster_id = cluster_groups[entity.clusterID]
+        if len(entity.groupWords) > 0:
+            entity_id = uuid.uuid4()
+            for token in entity.groupWords:
+                save_token(token.word, token.tag, word_order, entity_id, cluster_id, document_id)
+                word_order += 1
+        else:
+            d = 4
+            word_order += 1
