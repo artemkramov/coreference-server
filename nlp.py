@@ -4,10 +4,16 @@ import os
 import re
 import uuid
 from word import Word
+import db
 
+# Encoding of the files
 ENCODING = 'utf-8'
 
+# Global variable which is used for handling of the buffer output
 output = ""
+
+# Database session marker
+db_session = db.session()
 
 
 # Print output from CLI
@@ -98,33 +104,99 @@ def extract_entities(text, ner):
     }
     return summary
 
-def parse_tag(tagString):
-    b = 5
+
+# Parse tag string (like столиця/noun:inanim:p:v_rod - https://github.com/brown-uk/dict_uk/blob/master/doc/tags.txt)
+def parse_tag(tag_string):
+    # Split by slash to divide lemma and morphological attributes
+    common_parts = tag_string.split('/')
+
+    # Set initial data
+    part_of_speech = None
+    is_plural = False
+    gender = None
+    lemma = ""
+
+    # If the splitting operation is correct
+    if len(common_parts) > 1:
+
+        # Get lemmatized word
+        lemma = common_parts[0]
+
+        # Split second part to get separate
+        morphology_attributes = common_parts[1].split(':')
+        part_of_speech = morphology_attributes[0]
+        morphology_attributes = morphology_attributes[1:]
+        for morphology_attribute in morphology_attributes:
+            # Extract gender
+            if morphology_attribute in ['m', 'n', 'f']:
+                gender = morphology_attribute
+
+            # Extract plurality
+            if morphology_attribute == 'p':
+                is_plural = True
+
+    return part_of_speech, is_plural, gender, lemma
 
 
-def save_token(word, tag, word_order, entity_id, coreference_group_id, document_id):
+# Save token with the given parameters
+def save_token(word, tag_string, word_order, entity_id, coreference_group_id, document_id, is_proper_name):
     token = Word()
     token.RawText = word
     token.DocumentID = document_id
     token.WordOrder = word_order
+    part_of_speech, is_plural, gender, lemma = parse_tag(tag_string)
+    token.PartOfSpeech = part_of_speech
+    token.Lemmatized = lemma
+    token.IsPlural = is_plural
+    token.IsProperName = is_proper_name
+    token.Gender = gender
+    token.EntityID = entity_id
+    token.CoreferenceGroupID = coreference_group_id
+    token.RawTagString = tag_string
+    db_session.add(token)
+    db_session.commit()
 
 
-
+# Save all tokens with corresponding groups
 def save_tokens(entities):
+    # Word order in the document
     word_order = 0
+
+    # Dictionary of cluster groups
     cluster_groups = {}
+
+    # Generate unique document ID
     document_id = uuid.uuid4()
+
+    # Loop through collection of entities
     for entity in entities:
+        entity_id = None
         cluster_id = None
-        if not (entity.clusterID is None):
-            if not (entity.clusterID in cluster_groups):
-                cluster_groups[entity.clusterID] = uuid.uuid4()
-            cluster_id = cluster_groups[entity.clusterID]
-        if len(entity.groupWords) > 0:
+        is_proper_name = False
+
+        if not (entity['groupID'] is None):
+            is_proper_name = True
+
+        # Check if entity is located inside some cluster
+        if not (entity['clusterID'] is None):
+            # Create new cluster group inside dictionary if it doesn't exist
+            if not (entity['clusterID'] in cluster_groups):
+                cluster_groups[entity['clusterID']] = uuid.uuid4()
+            cluster_id = cluster_groups[entity['clusterID']]
+
+        # Check if entity contains few words
+        if len(entity['groupWords']) > 0:
+
+            # Generate common entity ID for all words of the entity
+            # and save each inner word
             entity_id = uuid.uuid4()
-            for token in entity.groupWords:
-                save_token(token.word, token.tag, word_order, entity_id, cluster_id, document_id)
+            for token in entity['groupWords']:
+                save_token(token['word'], token['tag'], word_order, entity_id, cluster_id, document_id, is_proper_name)
                 word_order += 1
         else:
-            d = 4
+            # Generate unique ID if the input token is entity (noun or pronoun)
+            # and save it
+            if entity['isEntity']:
+                entity_id = uuid.uuid4()
+            save_token(entity['word'], entity['tag'], word_order, entity_id, cluster_id, document_id, is_proper_name)
             word_order += 1
