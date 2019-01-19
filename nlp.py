@@ -4,6 +4,7 @@ import os
 import re
 import uuid
 from word import Word
+from babelfy_client import Babelfy
 import db
 
 # Encoding of the files
@@ -14,6 +15,9 @@ output = ""
 
 # Database session marker
 db_session = db.session()
+
+# Set Babelfy client entity for working with remote API
+babelfy = Babelfy()
 
 
 # Print output from CLI
@@ -37,6 +41,9 @@ def tag(in_txt):
 
 # Extract all named entities and nouns/pronouns from text
 def extract_entities(text, ner):
+    # Send babelfy request for retrieving of named entities
+    babelfy_entities = babelfy.send_text(text)
+
     text_tagged = tag(text)
 
     # Fetch all tokens with appropriate tags
@@ -61,7 +68,18 @@ def extract_entities(text, ner):
         tagged_words.append(tagged_word)
 
     # Apply NER model for searching of named entities
-    named_entities = ner.extract_entities(tokens)
+    named_entities_models = ner.extract_entities(tokens)
+
+    # Merge found named entities with babelfy entities
+    named_entities = babelfy_entities[:]
+    for named_entities_model in named_entities_models:
+        is_entity_new = True
+        for babelfy_entity in babelfy_entities:
+            if len(set(babelfy_entity).intersection(named_entities_model[0])) > 0:
+                is_entity_new = False
+                break
+        if is_entity_new:
+            named_entities.append(named_entities_model[0])
 
     # Form list of positions which are used in the named entity
     # It is used for ignoring of them further
@@ -69,31 +87,48 @@ def extract_entities(text, ner):
     named_entities_range = []
     for idx, named_entity in enumerate(named_entities):
 
-        # Convert range to list for JSON serialization
-        named_entities_range.append(list(named_entity[0]))
-
         # Set common group ID for all words of the named entity
         group_id = idx
+        named_entities_index = []
 
-        group_word = " ".join(tagged_words[i]['word'] for i in named_entity[0])
+        for i in named_entity:
 
-        group_length = len(list(named_entity[0]))
-
-        for i in named_entity[0]:
+            # Check if entity group doesn't contain dot symbol
+            # which represents the end of the sentence
+            token = tagged_words[i]
+            if token['tag'] == './SENT_END':
+                if i == 0:
+                    continue
+                else:
+                    break
+            named_entities_index.append(i)
             exclude_entities_index.append(i)
             tagged_words[i]['isEntity'] = True
             tagged_words[i]['groupID'] = group_id
-            tagged_words[i]['groupLength'] = group_length
-            tagged_words[i]['groupWord'] = group_word
+
+        group_word = " ".join(tagged_words[i]['word'] for i in named_entities_index)
+        group_length = len(named_entities_index)
+        tagged_words[named_entities_index[0]]['groupLength'] = group_length
+        tagged_words[named_entities_index[0]]['groupWord'] = group_word
+        # Convert range to list for JSON serialization
+        named_entities_range.append(named_entities_index)
     entities = []
     for position, token in enumerate(tagged_words):
+        # Check if word isn't a part of named entity
+        if not (position in exclude_entities_index):
 
-        # Detect noun or pronoun
-        tag_string = token['tag']
-        if tag_string.find("noun") > -1 or tag_string.find("&pron") > -1:
+            # Check if it is an abbreviation
+            is_abbreviation = len(token['word']) > 1 and token['word'].isupper()
 
-            # Check if word isn't a part of named entity
-            if not (position in exclude_entities_index):
+            # Tag string for the detection of the part of speech and its attributes
+            tag_string = token['tag']
+
+            # Check if the entity is personal pronoun
+            is_personal_pronoun = False
+            if tag_string.find("&pron") > -1 and tag_string.find("pers") > -1:
+                is_personal_pronoun = True
+
+            if tag_string.find("noun") > -1 or is_personal_pronoun or is_abbreviation:
                 entities.append(position)
                 tagged_words[position]['isEntity'] = True
 
