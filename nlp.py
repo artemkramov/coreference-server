@@ -124,11 +124,14 @@ def extract_entities(text, ner):
             tag_string = token['tag']
 
             # Check if the entity is personal pronoun
+            is_pronoun = False
+            if tag_string.find("&pron") > -1:
+                is_pronoun = True
             is_personal_pronoun = False
-            if tag_string.find("&pron") > -1 and tag_string.find("pers") > -1:
+            if is_pronoun and tag_string.find("pers") > -1:
                 is_personal_pronoun = True
 
-            if tag_string.find("noun") > -1 or is_personal_pronoun or is_abbreviation:
+            if (tag_string.find("noun") > -1 and not is_pronoun) or is_personal_pronoun or is_abbreviation:
                 entities.append(position)
                 tagged_words[position]['isEntity'] = True
 
