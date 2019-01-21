@@ -5,6 +5,7 @@ import re
 import uuid
 from word import Word
 from babelfy_client import Babelfy
+from universal_dependency_model import UniversalDependencyModel
 import db
 
 # Encoding of the files
@@ -18,6 +19,9 @@ db_session = db.session()
 
 # Set Babelfy client entity for working with remote API
 babelfy = Babelfy()
+
+# Load UD parser model
+ud_model = UniversalDependencyModel('ukrainian-iu-ud-2.3-181115.udpipe')
 
 
 # Print output from CLI
@@ -41,6 +45,14 @@ def tag(in_txt):
 
 # Extract all named entities and nouns/pronouns from text
 def extract_entities(text, ner):
+    # Parse text with UD
+    sentences = ud_model.tokenize(text)
+    for s in sentences:
+        ud_model.tag(s)
+        ud_model.parse(s)
+    ud_model.extract_noun_phrases(sentences)
+    raise Exception("sdfsdfsdf")
+
     # Send babelfy request for retrieving of named entities
     babelfy_entities = babelfy.send_text(text)
 
@@ -69,6 +81,7 @@ def extract_entities(text, ner):
 
     # Apply NER model for searching of named entities
     named_entities_models = ner.extract_entities(tokens)
+
 
     # Merge found named entities with babelfy entities
     named_entities = babelfy_entities[:]

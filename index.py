@@ -20,13 +20,13 @@ ner = named_entity_extractor('uk_model.dat')
 @app.route('/extract', methods=['POST'])
 def extractor():
     content = request.get_json()
-
+    tagged_data = nlp.extract_entities(content['text'], ner)
     # Extract all tokens, entities and named entities together with tags from the text
-    try:
-        tagged_data = nlp.extract_entities(content['text'], ner)
-        return jsonify(tagged_data)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+    # try:
+    #     tagged_data = nlp.extract_entities(content['text'], ner)
+    #     return jsonify(tagged_data)
+    # except Exception as e:
+    #     return jsonify({"error": str(e)}), 400
 
 
 @app.route('/save', methods=['POST'])
