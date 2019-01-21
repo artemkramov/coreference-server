@@ -65,24 +65,88 @@ class UniversalDependencyModel:
 
         return output
 
-    def extract_noun_phrases(self, sentences):
+    def extract_noun_phrases(self, sentences, named_entities):
+        sentences_groups = []
+        token_offset = 0
+        named_entities_indexes = []
+        for r in named_entities:
+            named_entities_indexes.extend(list(r))
+
+        # Loop through the sentences
         for s in sentences:
             i = 0
-            # print(s.getText())
             word_root_index = -1
+
+            # Loop through words of the sentence and find out root word
             while i < len(s.words):
                 word = s.words[i]
+
+                # Check if the head links to the <root> element
+                # and set index
                 if word.head == 0:
                     word_root_index = i
                     break
                 i += 1
-            word_root = s.words[word_root_index]
-            print(word_root.lemma, word_root.children)
-            groups = {}
-            self.np_recursive_extractor(word_root, s.words, groups, None)
-            print(groups)
 
-    def np_recursive_extractor(self, word, words, groups, head_id=None):
+            # Retrieve root word
+            word_root = s.words[word_root_index]
+
+            # Find groups with head nouns and corresponding tokens
+            groups = {}
+            self.np_recursive_extractor(word_root, s.words, groups, named_entities_indexes, token_offset, None)
+
+            # Fix token sequence inside each NP group
+            # It is necessary to remove all spaces inside the group
+            np_indexes = list(groups.keys())
+            np_indexes.sort()
+
+            sentence_group = []
+            for np_index in np_indexes:
+
+                # Get all token list of NP and sort it in ascending order
+                group = groups[np_index]
+                group.sort()
+
+                # Find index of head token
+                np_group_idx = group.index(np_index)
+
+                # Init corrected group
+                group_aligned = [np_index]
+
+                # Loop till the end of list from the head word
+                # and check if all numbers is located near each other
+                i = np_group_idx + 1
+                while i < len(group):
+                    if group[i] == group[i - 1] + 1:
+                        group_aligned.append(group[i])
+                    else:
+                        break
+                    i += 1
+
+                # Loop till the start of list from the head word
+                # and check if all numbers is located near each other
+                i = np_group_idx - 1
+                while i >= 0:
+                    if group[i] + 1 == group[i + 1]:
+                        group_aligned.append(group[i])
+                    else:
+                        break
+                    i -= 1
+
+                # Sort aligned group
+                group_aligned.sort()
+                # Append group as range
+                sentence_group.append({
+                    'head_word_idx': np_index + token_offset,
+                    'items': range(group_aligned[0] + token_offset, group_aligned[-1] + token_offset + 1)
+                })
+
+            # Append all groups of the sentence to the general collection
+            sentences_groups.extend(sentence_group)
+            token_offset += len(s.words)
+        return sentences_groups
+
+    def np_recursive_extractor(self, word, words, groups, named_entity_indexes, offset, head_id=None):
         if groups is None:
             groups = {}
         i = 0
@@ -105,6 +169,7 @@ class UniversalDependencyModel:
                 # Check if we can add current noun to another NP
                 # Firstly check if the type of the relation is nmod
                 if deprel == self.np_relation_nmod and words[head_id].deprel != 'obl':
+
                     # Also check if current word contains case relation
                     j = 0
                     is_containing_case = False
@@ -117,19 +182,21 @@ class UniversalDependencyModel:
                     if not is_containing_case:
                         new_head_id = head_id
 
-        # print("%s ----- %s ------ %s ----- %s" % (word.form, word.misc, word.upostag, word.deprel))
+        # If the head word is set than add current token to its group
         if not (new_head_id is None):
-            self.np_push_to_group(groups, new_head_id, token_id)
+            # Check if head_id and token_id aren't already inside named entities
+            if (not (token_id + offset in named_entity_indexes)) and (not (new_head_id + offset in named_entity_indexes)):
+                self.np_push_to_group(groups, new_head_id, token_id)
+
+        # Loop through child words and call function in recursive manner
         while i < len(word.children):
             children_index = word.children[i]
-            self.np_recursive_extractor(words[children_index], words, groups, new_head_id)
+            self.np_recursive_extractor(words[children_index], words, groups, named_entity_indexes, offset, new_head_id)
             i += 1
 
     @staticmethod
     def np_push_to_group(groups, head_id, token_id):
-
         # Create head group if it doesn't exist
-        # print(head_id, groups)
         if not (head_id in groups):
             groups[head_id] = []
         groups[head_id].append(token_id)

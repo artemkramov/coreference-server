@@ -45,43 +45,65 @@ def tag(in_txt):
 
 # Extract all named entities and nouns/pronouns from text
 def extract_entities(text, ner):
-    # Parse text with UD
-    sentences = ud_model.tokenize(text)
-    for s in sentences:
-        ud_model.tag(s)
-        ud_model.parse(s)
-    ud_model.extract_noun_phrases(sentences)
-    raise Exception("sdfsdfsdf")
+    tokens = []
+    tagged_words = []
 
     # Send babelfy request for retrieving of named entities
     babelfy_entities = babelfy.send_text(text)
 
-    text_tagged = tag(text)
+    # Parse text with UD
+    sentences = ud_model.tokenize(text)
 
-    # Fetch all tokens with appropriate tags
-    # Set regular expression and extract pairs word-tag
-    tag_extractor = re.compile("([^\] ]+)\[(.*?)\]")
-    matches = tag_extractor.findall(text_tagged)
+    for s in sentences:
+        ud_model.tag(s)
+        ud_model.parse(s)
+
+        i = 0
+        while i < len(s.words):
+            word = s.words[i]
+            raw_word = word.form.strip()
+            tokens.append(raw_word)
+            word_tag = word.feats
+            if i == len(s.words) - 1 and raw_word == '.':
+                word_tag = './SENT_END'
+
+            tagged_word = {
+                'word': raw_word,
+                'tag': word_tag,
+                'isEntity': False,
+                'groupID': None,
+                'groupLength': None,
+                'groupWord': None,
+                'pos': word.upostag
+            }
+            tagged_words.append(tagged_word)
+            # print(word.feats)
+            i += 1
+
+    # text_tagged = tag(text)
+    #
+    # # Fetch all tokens with appropriate tags
+    # # Set regular expression and extract pairs word-tag
+    # tag_extractor = re.compile("([^\] ]+)\[(.*?)\]")
+    # matches = tag_extractor.findall(text_tagged)
 
     # Form set of tokens from extracted list of tuples
-    tokens = []
-    tagged_words = []
-    for item in matches:
-        word = item[0].strip()
-        tokens.append(word)
-        tagged_word = {
-            'word': word,
-            'tag': item[1],
-            'isEntity': False,
-            'groupID': None,
-            'groupLength': None,
-            'groupWord': None
-        }
-        tagged_words.append(tagged_word)
+
+    # for item in matches:
+    #     word = item[0].strip()
+    #     tokens.append(word)
+    #     tagged_word = {
+    #         'word': word,
+    #         'tag': item[1],
+    #         'isEntity': False,
+    #         'groupID': None,
+    #         'groupLength': None,
+    #         'groupWord': None
+    #     }
+    #     tagged_words.append(tagged_word)
 
     # Apply NER model for searching of named entities
     named_entities_models = ner.extract_entities(tokens)
-
 
     # Merge found named entities with babelfy entities
     named_entities = babelfy_entities[:]
@@ -91,8 +113,13 @@ def extract_entities(text, ner):
             if len(set(babelfy_entity).intersection(named_entities_model[0])) > 0:
                 is_entity_new = False
                 break
-        if is_entity_new:
+        if is_entity_new and named_entities_model[2] > 0.75:
             named_entities.append(named_entities_model[0])
+
+    # Extract noun phrases from text but with excluding of the named entities
+    ud_groups = ud_model.extract_noun_phrases(sentences, named_entities)
+    for ud_group in ud_groups:
+        named_entities.append(ud_group['items'])
 
     # Form list of positions which are used in the named entity
     # It is used for ignoring of them further
@@ -130,21 +157,15 @@ def extract_entities(text, ner):
         # Check if word isn't a part of named entity
         if not (position in exclude_entities_index):
 
-            # Check if it is an abbreviation
-            is_abbreviation = len(token['word']) > 1 and token['word'].isupper()
-
             # Tag string for the detection of the part of speech and its attributes
             tag_string = token['tag']
 
             # Check if the entity is personal pronoun
-            is_pronoun = False
-            if tag_string.find("&pron") > -1:
-                is_pronoun = True
             is_personal_pronoun = False
-            if is_pronoun and tag_string.find("pers") > -1:
+            if token['pos'] == 'PRON' and tag_string.find("PronType=Prs") > -1:
                 is_personal_pronoun = True
 
-            if (tag_string.find("noun") > -1 and not is_pronoun) or is_personal_pronoun or is_abbreviation:
+            if is_personal_pronoun or token['pos'] == 'PROPN':
                 entities.append(position)
                 tagged_words[position]['isEntity'] = True
 
