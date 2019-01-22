@@ -48,9 +48,6 @@ def extract_entities(text, ner):
     tokens = []
     tagged_words = []
 
-    # Send babelfy request for retrieving of named entities
-    babelfy_entities = babelfy.send_text(text)
-
     # Parse text with UD
     sentences = ud_model.tokenize(text)
 
@@ -80,46 +77,25 @@ def extract_entities(text, ner):
             # print(word.feats)
             i += 1
 
-    # text_tagged = tag(text)
-    #
-    # # Fetch all tokens with appropriate tags
-    # # Set regular expression and extract pairs word-tag
-    # tag_extractor = re.compile("([^\] ]+)\[(.*?)\]")
-    # matches = tag_extractor.findall(text_tagged)
-
-    # Form set of tokens from extracted list of tuples
-
-    # for item in matches:
-    #     word = item[0].strip()
-    #     tokens.append(word)
-    #     tagged_word = {
-    #         'word': word,
-    #         'tag': item[1],
-    #         'isEntity': False,
-    #         'groupID': None,
-    #         'groupLength': None,
-    #         'groupWord': None
-    #     }
-    #     tagged_words.append(tagged_word)
-
     # Apply NER model for searching of named entities
     named_entities_models = ner.extract_entities(tokens)
 
-    # Merge found named entities with babelfy entities
-    named_entities = babelfy_entities[:]
+    # Add found named entities
+    named_entities = []
     for named_entities_model in named_entities_models:
-        is_entity_new = True
-        for babelfy_entity in babelfy_entities:
-            if len(set(babelfy_entity).intersection(named_entities_model[0])) > 0:
-                is_entity_new = False
-                break
-        if is_entity_new and named_entities_model[2] > 0.75:
-            named_entities.append(named_entities_model[0])
+        if named_entities_model[2] > 0.4:
+            named_entities.append({
+                'items': named_entities_model[0],
+                'head_word': None
+            })
 
     # Extract noun phrases from text but with excluding of the named entities
     ud_groups = ud_model.extract_noun_phrases(sentences, named_entities)
     for ud_group in ud_groups:
-        named_entities.append(ud_group['items'])
+        named_entities.append({
+            'items': ud_group['items'],
+            'head_word': ud_group['head_word']
+        })
 
     # Form list of positions which are used in the named entity
     # It is used for ignoring of them further
@@ -131,7 +107,7 @@ def extract_entities(text, ner):
         group_id = idx
         named_entities_index = []
 
-        for i in named_entity:
+        for i in named_entity['items']:
 
             # Check if entity group doesn't contain dot symbol
             # which represents the end of the sentence
@@ -145,6 +121,8 @@ def extract_entities(text, ner):
             exclude_entities_index.append(i)
             tagged_words[i]['isEntity'] = True
             tagged_words[i]['groupID'] = group_id
+            if i == named_entity['head_word'] and (not (named_entity['head_word'] is None)):
+                tagged_words[i]['isHeadWord'] = True
 
         group_word = " ".join(tagged_words[i]['word'] for i in named_entities_index)
         group_length = len(named_entities_index)
@@ -165,7 +143,7 @@ def extract_entities(text, ner):
             if token['pos'] == 'PRON' and tag_string.find("PronType=Prs") > -1:
                 is_personal_pronoun = True
 
-            if is_personal_pronoun or token['pos'] == 'PROPN':
+            if is_personal_pronoun or token['pos'] == 'PROPN' or token['pos'] == 'X':
                 entities.append(position)
                 tagged_words[position]['isEntity'] = True
 
