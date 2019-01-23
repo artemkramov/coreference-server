@@ -7,6 +7,8 @@ from word import Word
 from babelfy_client import Babelfy
 from universal_dependency_model import UniversalDependencyModel
 import db
+import csv
+import string
 
 # Encoding of the files
 ENCODING = 'utf-8'
@@ -17,11 +19,86 @@ output = ""
 # Database session marker
 db_session = db.session()
 
+# Load gazetteers
+gazetteer = []
+with open('gazetteers\\gazetteer.csv', encoding='utf-8') as f:
+    reader = csv.reader(f)
+    for row in reader:
+        gazetteer.append(row[0])
+    # For test purpose cut size
+    # gazetteer = gazetteer[:10]
+
 # Set Babelfy client entity for working with remote API
 babelfy = Babelfy()
 
 # Load UD parser model
 ud_model = UniversalDependencyModel('ukrainian-iu-ud-2.3-181115.udpipe')
+
+
+# Apply gazetteer for text and try ro find named entities from it
+def preprocess_text_with_gazetteer(text):
+    # Array with terms which were found in the text
+    gazetteer_entity_pointers = []
+
+    # List with ranges of all found gazetteer entities
+    gazetteer_entities = []
+
+    # Loop through gazetteer terms and try to find matches
+    for term in gazetteer:
+        # Apply regular expression and generate list of tuples (start, end) with all occurrences
+        term_occurrences = [(m.start(), m.start() + len(term)) for m in re.finditer(term, text)]
+        if len(term_occurrences) > 0:
+            # Parse term to form the tokens which will replace UUID
+            tokens = []
+            term_sentences = ud_model.tokenize(term)
+            for s in term_sentences:
+                i = 0
+                while i < len(s.words):
+                    # Omit <root> tag
+                    if s.words[i].form != '<root>':
+                        tokens.append(s.words[i].form)
+                    i += 1
+
+            # Add entity to gazetteer vocabulary
+            gazetteer_entity_pointers.append({
+                'term': term,
+                'tokens': tokens
+            })
+    # Tokenize the whole text
+    sentences = ud_model.tokenize(text)
+    print("Sentence length: %d" % len(sentences))
+
+    # Loop through each found gazetteer entity
+    for gazetteer_entity_pointer in gazetteer_entity_pointers:
+        window_size = len(gazetteer_entity_pointer['tokens'])
+        sentence_offset = 0
+        # Loop though all words of each sentence
+        # and check if window is equal to current clique
+        for s in sentences:
+            i = 0
+
+            # Slide window across all text
+            while i < len(s.words) - window_size:
+                # Set start and finish position of current clique
+                j = i
+                is_clique_entity = True
+                clique_end = i + window_size
+
+                # Loop through clique and compare its tokens with gazetteer entity tokens
+                while j < clique_end:
+                    if s.words[j].form != gazetteer_entity_pointer['tokens'][j - i]:
+                        is_clique_entity = False
+                        break
+                    j += 1
+                if is_clique_entity:
+                    gazetteer_entities.append({
+                        'items': range(i + sentence_offset, clique_end + sentence_offset),
+                        'head_word': None
+                    })
+                i += 1
+            sentence_offset += len(s.words)
+
+    return gazetteer_entities
 
 
 # Print output from CLI
@@ -47,6 +124,9 @@ def tag(in_txt):
 def extract_entities(text, ner):
     tokens = []
     tagged_words = []
+
+    # Apply gazetteer for the text and tokenize text
+    gazetteer_entities = preprocess_text_with_gazetteer(text)
 
     # Parse text with UD
     sentences = ud_model.tokenize(text)
@@ -80,17 +160,24 @@ def extract_entities(text, ner):
     # Apply NER model for searching of named entities
     named_entities_models = ner.extract_entities(tokens)
 
-    # Add found named entities
-    named_entities = []
+    # Add named entities that were found
+    # But check if their does'nt intersect with gazetteer data
+    named_entities = gazetteer_entities[:]
     for named_entities_model in named_entities_models:
-        if named_entities_model[2] > 0.4:
+        is_entity_new = True
+        for gazetteer_entity in gazetteer_entities:
+            if len(set(gazetteer_entity['items']).intersection(named_entities_model[0])) > 0:
+                is_entity_new = False
+                break
+        if is_entity_new and named_entities_model[2] > 0.4:
             named_entities.append({
                 'items': named_entities_model[0],
                 'head_word': None
             })
+    named_entities_indexes = [entity['items'] for entity in named_entities]
 
     # Extract noun phrases from text but with excluding of the named entities
-    ud_groups = ud_model.extract_noun_phrases(sentences, named_entities)
+    ud_groups = ud_model.extract_noun_phrases(sentences, named_entities_indexes)
     for ud_group in ud_groups:
         named_entities.append({
             'items': ud_group['items'],

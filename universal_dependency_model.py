@@ -201,8 +201,8 @@ class UniversalDependencyModel:
         # If the head word is set than add current token to its group
         if not (new_head_id is None):
             # Check if head_id and token_id aren't already inside named entities
-            if (not (token_id + offset in named_entity_indexes)) and (
-                    not (new_head_id + offset in named_entity_indexes)):
+            if (not ((token_id + offset) in named_entity_indexes)) and (
+                    not ((new_head_id + offset) in named_entity_indexes)):
                 self.np_push_to_group(groups, new_head_id, token_id)
 
         # Set default children parts as empty and all
