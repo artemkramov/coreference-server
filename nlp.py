@@ -160,7 +160,6 @@ def extract_entities(text, ner):
                 'head_word': None,
                 'is_proper_name': True
             })
-    named_entities_indexes = [entity['items'] for entity in named_entities]
 
     # Extract noun phrases from text but with excluding of the named entities
     ud_groups = ud_model.extract_noun_phrases(sentences, [])
@@ -249,33 +248,6 @@ def extract_entities(text, ner):
     return summary
 
 
-# Parse tag string (like Animacy=Inan|Case=Loc|Gender=Masc|Number=Sing
-# https://universaldependencies.org/u/feat/index.html
-def parse_tag(tag_string):
-    # Split by delimiter to seperate each
-    morphology_attributes = tag_string.split('|')
-
-    # Set initial data
-    is_plural = False
-    gender = None
-
-    # If the splitting operation is correct
-    if len(morphology_attributes) > 1:
-
-        for morphology_attribute in morphology_attributes:
-            morphology = morphology_attribute.split('=')
-
-            # Extract gender
-            if morphology[0] == 'Gender':
-                gender = morphology[1]
-
-            # Extract plurality
-            if morphology[0] == 'Number' and morphology[1] == 'Plur':
-                is_plural = True
-
-    return is_plural, gender
-
-
 # Save token with the given parameters
 def save_token(parameters):
     # Create new word entity
@@ -286,7 +258,7 @@ def save_token(parameters):
     for attribute in attributes:
         setattr(token, attribute, parameters[attribute])
 
-    is_plural, gender = parse_tag(parameters['RawTagString'])
+    is_plural, gender = ud_model.parse_tag(parameters['RawTagString'])
     token.IsPlural = is_plural
     token.Gender = gender
     db_session.add(token)

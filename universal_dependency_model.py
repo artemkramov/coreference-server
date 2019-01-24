@@ -5,9 +5,11 @@ class UniversalDependencyModel:
     # udpipe compiled model
     model = None
 
-    np_simple_tags = ['ADJ', 'DET', 'NUM', 'PRON', 'PUNCT', 'SYM', 'ADP']
+    np_simple_tags = ['ADJ', 'DET', 'NUM', 'PRON', 'PUNCT', 'SYM']
     np_noun_tag = 'NOUN'
     np_prop_tag = 'PROPN'
+    np_head_tags = [np_noun_tag, np_prop_tag]
+    np_optional_tags = ['ADP', 'CCONJ']
 
     np_allowed_tags = []
 
@@ -17,7 +19,7 @@ class UniversalDependencyModel:
 
     np_relation_child = ['nmod', 'compound', 'fixed', 'flat']
 
-    np_strip_symbols = [',', ')', '(', '-', '"', ':']
+    np_strip_symbols = [',', ')', '(', '-', '"', ':', '»', '«']
     np_forbidden_child_symbols = [',', ')', '(', ':']
 
     def __init__(self, path):
@@ -145,10 +147,10 @@ class UniversalDependencyModel:
                 group_aligned.sort()
 
                 # Remove comma at the start and end of sequence
-                if len(group_aligned) > 1 and s.words[group_aligned[0]].form in self.np_strip_symbols:
-                    del group_aligned[0]
-                if len(group_aligned) > 1 and s.words[group_aligned[-1]].form in self.np_strip_symbols:
-                    del group_aligned[-1]
+                self.np_strip(group_aligned, 'form', self.np_strip_symbols, s.words)
+
+                # Remove prepositions from the start/end of phrase
+                self.np_strip(group_aligned, 'upostag', self.np_optional_tags, s.words)
 
                 # Append group as range
                 is_proper_name = False
@@ -165,6 +167,53 @@ class UniversalDependencyModel:
             token_offset += len(s.words)
         return sentences_groups
 
+    # Parse tag string (like Animacy=Inan|Case=Loc|Gender=Masc|Number=Sing
+    @staticmethod
+    def parse_morphological_tag(tag_string):
+        # Split by delimiter to separate each string
+        morphology_strings = tag_string.split('|')
+        morphology_attributes = []
+        for morphology_string in morphology_strings:
+            # Split each string to fetch attribute and its value
+            morphology_attribute = morphology_string.split('=')
+            morphology_attributes.append(morphology_attribute)
+        return morphology_attributes
+
+    # Fetch morphological feature by the given name
+    def fetch_morphological_feature(self, tag_string, feature_name):
+        morphology_attributes = self.parse_morphological_tag(tag_string)
+        return [attribute_data[1] for attribute_data in morphology_attributes if attribute_data[0] == feature_name]
+
+    # Parse tag string (like Animacy=Inan|Case=Loc|Gender=Masc|Number=Sing
+    # https://universaldependencies.org/u/feat/index.html
+    def parse_tag(self, tag_string):
+        morphology_attributes = self.parse_morphological_tag(tag_string)
+
+        # Set initial data
+        is_plural = False
+        gender = None
+
+        for morphology in morphology_attributes:
+
+            # Extract gender
+            if morphology[0] == 'Gender':
+                gender = morphology[1]
+
+            # Extract plurality
+            if morphology[0] == 'Number' and morphology[1] == 'Plur':
+                is_plural = True
+
+        return is_plural, gender
+
+    # Strip noun phrase with given filter and parameter
+    @staticmethod
+    def np_strip(group, attribute, detect_group, words):
+        if len(group) > 1 and getattr(words[group[0]], attribute) in detect_group:
+            del group[0]
+        if len(group) > 1 and getattr(words[group[-1]], attribute) in detect_group:
+            del group[-1]
+
+    # Traverse the syntactic tree and find noun phrases
     def np_recursive_extractor(self, word, words, groups, named_entity_indexes, offset, head_id=None):
         if groups is None:
             groups = {}
@@ -190,7 +239,7 @@ class UniversalDependencyModel:
                 new_head_id = head_id
 
         # Separately we analyze the noun and proper name
-        if u_pos_tag == self.np_noun_tag or u_pos_tag == self.np_prop_tag:
+        if u_pos_tag in self.np_head_tags:
             new_head_id = token_id
             is_object = True
             # If it is necessary to add the current token to another group
@@ -215,6 +264,14 @@ class UniversalDependencyModel:
                                 is_allowed_to_inherit = False
                                 break
                             start += 1
+
+                    # For nmod relation check if the Case morphological feature is different for objects
+                    token_case = self.fetch_morphological_feature(word.feats, 'Case')
+                    head_case = self.fetch_morphological_feature(words[head_id].feats, 'Case')
+                    if deprel == self.np_relation_nmod and token_case == head_case and \
+                            u_pos_tag == self.np_noun_tag and words[head_id].upostag == self.np_noun_tag:
+                        is_allowed_to_inherit = False
+
                     if is_allowed_to_inherit:
                         new_head_id = head_id
 
