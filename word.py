@@ -16,6 +16,7 @@ class Word(Base):
     Lemmatized = Column(String)
     IsPlural = Column(Integer)
     IsProperName = Column(Integer)
+    IsHeadWord = Column(Integer)
     Gender = Column(String)
     EntityID = Column(String)
     RawTagString = Column(String)

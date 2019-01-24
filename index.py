@@ -23,22 +23,13 @@ def extractor():
     # Extract all tokens, entities and named entities together with tags from the text
     tagged_data = nlp.extract_entities(content['text'], ner)
     return jsonify(tagged_data)
-    # try:
-    #     tagged_data = nlp.extract_entities(content['text'], ner)
-    #     return jsonify(tagged_data)
-    # except Exception as e:
-    #     return jsonify({"error": str(e)}), 400
 
 
 @app.route('/save', methods=['POST'])
 def save_clusters():
     content = request.get_json()
-    # Save all tokens with corresponding tags and relations
-    try:
-        nlp.save_tokens(content)
-        return jsonify({})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+    nlp.save_tokens(content)
+    return jsonify({})
 
 
 # Run HTTP web-server

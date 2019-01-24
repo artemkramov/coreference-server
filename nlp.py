@@ -20,6 +20,7 @@ output = ""
 db_session = db.session()
 
 # Load gazetteers
+print('Loading gazetteer...')
 gazetteer = []
 with open('gazetteers\\gazetteer.csv', encoding='utf-8') as f:
     reader = csv.reader(f)
@@ -66,7 +67,6 @@ def preprocess_text_with_gazetteer(text):
             })
     # Tokenize the whole text
     sentences = ud_model.tokenize(text)
-    print("Sentence length: %d" % len(sentences))
 
     # Loop through each found gazetteer entity
     for gazetteer_entity_pointer in gazetteer_entity_pointers:
@@ -93,31 +93,13 @@ def preprocess_text_with_gazetteer(text):
                 if is_clique_entity:
                     gazetteer_entities.append({
                         'items': range(i + sentence_offset, clique_end + sentence_offset),
-                        'head_word': None
+                        'head_word': None,
+                        'is_proper_name': True
                     })
                 i += 1
             sentence_offset += len(s.words)
 
     return gazetteer_entities
-
-
-# Print output from CLI
-def print_output(p):
-    global output
-    output = p.stdout.read().decode(ENCODING)
-
-
-# Set tags for text words
-def tag(in_txt):
-    script_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'TagText.groovy')
-    cmd = ['groovy', script_path, '-i', '-', '-o', '-', '-f']
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-    thread = threading.Thread(target=print_output, args=(p,))
-    thread.start()
-    p.stdin.write(in_txt.encode(ENCODING))
-    p.stdin.close()
-    thread.join()
-    return output
 
 
 # Extract all named entities and nouns/pronouns from text
@@ -146,8 +128,11 @@ def extract_entities(text, ner):
 
             tagged_word = {
                 'word': raw_word,
+                'lemma': word.lemma,
                 'tag': word_tag,
                 'isEntity': False,
+                'isProperName': False,
+                'isHeadWord': False,
                 'groupID': None,
                 'groupLength': None,
                 'groupWord': None,
@@ -172,18 +157,34 @@ def extract_entities(text, ner):
         if is_entity_new and named_entities_model[2] > 0.4:
             named_entities.append({
                 'items': named_entities_model[0],
-                'head_word': None
+                'head_word': None,
+                'is_proper_name': True
             })
     named_entities_indexes = [entity['items'] for entity in named_entities]
 
     # Extract noun phrases from text but with excluding of the named entities
-    ud_groups = ud_model.extract_noun_phrases(sentences, named_entities_indexes)
+    ud_groups = ud_model.extract_noun_phrases(sentences, [])
+    new_ud_groups = []
     for ud_group in ud_groups:
-        named_entities.append({
-            'items': ud_group['items'],
-            'head_word': ud_group['head_word']
-        })
+        is_intersection = False
+        for named_entity in named_entities:
+            if len(set(named_entity['items']).intersection(set(ud_group['items']))) > 0:
+                is_intersection = True
+                items = list(set(named_entity['items']).union(set(ud_group['items'])))
+                items.sort()
+                group_items = range(items[0], items[-1] + 1)
+                named_entity['items'] = group_items
+                named_entity['head_word'] = ud_group['head_word']
+                named_entity['is_proper_name'] = ud_group['is_proper_name']
+                break
+        if not is_intersection:
+            new_ud_groups.append({
+                'items': ud_group['items'],
+                'head_word': ud_group['head_word'],
+                'is_proper_name': ud_group['is_proper_name']
+            })
 
+    named_entities.extend(new_ud_groups)
     # Form list of positions which are used in the named entity
     # It is used for ignoring of them further
     exclude_entities_index = []
@@ -208,6 +209,8 @@ def extract_entities(text, ner):
             exclude_entities_index.append(i)
             tagged_words[i]['isEntity'] = True
             tagged_words[i]['groupID'] = group_id
+            if named_entity['is_proper_name']:
+                tagged_words[i]['isProperName'] = True
             if i == named_entity['head_word'] and (not (named_entity['head_word'] is None)):
                 tagged_words[i]['isHeadWord'] = True
 
@@ -234,6 +237,10 @@ def extract_entities(text, ner):
                 entities.append(position)
                 tagged_words[position]['isEntity'] = True
 
+            # Check if proper name was detected
+            if token['pos'] == 'PROPN':
+                tagged_words[position]['isProperName'] = True
+
     summary = {
         "tokens": tagged_words,
         "named_entities": named_entities_range,
@@ -242,54 +249,46 @@ def extract_entities(text, ner):
     return summary
 
 
-# Parse tag string (like столиця/noun:inanim:p:v_rod - https://github.com/brown-uk/dict_uk/blob/master/doc/tags.txt)
+# Parse tag string (like Animacy=Inan|Case=Loc|Gender=Masc|Number=Sing
+# https://universaldependencies.org/u/feat/index.html
 def parse_tag(tag_string):
-    # Split by slash to divide lemma and morphological attributes
-    common_parts = tag_string.split('/')
+    # Split by delimiter to seperate each
+    morphology_attributes = tag_string.split('|')
 
     # Set initial data
-    part_of_speech = None
     is_plural = False
     gender = None
-    lemma = ""
 
     # If the splitting operation is correct
-    if len(common_parts) > 1:
+    if len(morphology_attributes) > 1:
 
-        # Get lemmatized word
-        lemma = common_parts[0]
-
-        # Split second part to get separate
-        morphology_attributes = common_parts[1].split(':')
-        part_of_speech = morphology_attributes[0]
-        morphology_attributes = morphology_attributes[1:]
         for morphology_attribute in morphology_attributes:
+            morphology = morphology_attribute.split('=')
+
             # Extract gender
-            if morphology_attribute in ['m', 'n', 'f']:
-                gender = morphology_attribute
+            if morphology[0] == 'Gender':
+                gender = morphology[1]
 
             # Extract plurality
-            if morphology_attribute == 'p':
+            if morphology[0] == 'Number' and morphology[1] == 'Plur':
                 is_plural = True
 
-    return part_of_speech, is_plural, gender, lemma
+    return is_plural, gender
 
 
 # Save token with the given parameters
-def save_token(word, tag_string, word_order, entity_id, coreference_group_id, document_id, is_proper_name):
+def save_token(parameters):
+    # Create new word entity
     token = Word()
-    token.RawText = word
-    token.DocumentID = document_id
-    token.WordOrder = word_order
-    part_of_speech, is_plural, gender, lemma = parse_tag(tag_string)
-    token.PartOfSpeech = part_of_speech
-    token.Lemmatized = lemma
+
+    # Set all dictionary attributes to new word object
+    attributes = list(parameters.keys())
+    for attribute in attributes:
+        setattr(token, attribute, parameters[attribute])
+
+    is_plural, gender = parse_tag(parameters['RawTagString'])
     token.IsPlural = is_plural
-    token.IsProperName = is_proper_name
     token.Gender = gender
-    token.EntityID = entity_id
-    token.CoreferenceGroupID = coreference_group_id
-    token.RawTagString = tag_string
     db_session.add(token)
     db_session.commit()
 
@@ -309,10 +308,9 @@ def save_tokens(entities):
     for entity in entities:
         entity_id = None
         cluster_id = None
-        is_proper_name = False
 
-        if not (entity['groupID'] is None):
-            is_proper_name = True
+        if entity['pos'] == '<root>':
+            continue
 
         # Check if entity is located inside some cluster
         if not (entity['clusterID'] is None):
@@ -328,12 +326,36 @@ def save_tokens(entities):
             # and save each inner word
             entity_id = uuid.uuid4()
             for token in entity['groupWords']:
-                save_token(token['word'], token['tag'], word_order, entity_id, cluster_id, document_id, is_proper_name)
+                parameters = {
+                    'RawText': token['word'],
+                    'DocumentID': document_id,
+                    'WordOrder': word_order,
+                    'Lemmatized': token['lemma'],
+                    'EntityID': entity_id,
+                    'CoreferenceGroupID': cluster_id,
+                    'RawTagString': token['tag'],
+                    'IsHeadWord': token['isHeadWord'],
+                    'IsProperName': token['isProperName'],
+                    'PartOfSpeech': token['pos']
+                }
+                save_token(parameters)
                 word_order += 1
         else:
             # Generate unique ID if the input token is entity (noun or pronoun)
             # and save it
             if entity['isEntity']:
                 entity_id = uuid.uuid4()
-            save_token(entity['word'], entity['tag'], word_order, entity_id, cluster_id, document_id, is_proper_name)
+            parameters = {
+                'RawText': entity['word'],
+                'DocumentID': document_id,
+                'WordOrder': word_order,
+                'Lemmatized': entity['lemma'],
+                'EntityID': entity_id,
+                'CoreferenceGroupID': cluster_id,
+                'RawTagString': entity['tag'],
+                'IsHeadWord': entity['isHeadWord'],
+                'IsProperName': entity['isProperName'],
+                'PartOfSpeech': entity['pos']
+            }
+            save_token(parameters)
             word_order += 1

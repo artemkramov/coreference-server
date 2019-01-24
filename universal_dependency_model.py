@@ -5,19 +5,26 @@ class UniversalDependencyModel:
     # udpipe compiled model
     model = None
 
-    np_simple_tags = ['ADJ', 'DET', 'NUM', 'PRON', 'PUNCT', 'SYM']
+    np_simple_tags = ['ADJ', 'DET', 'NUM', 'PRON', 'PUNCT', 'SYM', 'ADP']
     np_noun_tag = 'NOUN'
     np_prop_tag = 'PROPN'
+
+    np_allowed_tags = []
 
     np_relation_nmod = 'nmod'
     np_relation_case = 'case'
     np_relation_obl = 'obl'
 
-    np_strip_symbols = [',', ')', '(', '-', '"']
+    np_relation_child = ['nmod', 'compound', 'fixed', 'flat']
+
+    np_strip_symbols = [',', ')', '(', '-', '"', ':']
+    np_forbidden_child_symbols = [',', ')', '(', ':']
 
     def __init__(self, path):
         # Load model by the given path
         self.model = ufal.udpipe.Model.load(path)
+        self.np_allowed_tags = self.np_simple_tags[:]
+        self.np_allowed_tags.extend([self.np_noun_tag, self.np_prop_tag])
         if not self.model:
             raise Exception("Cannot load model by the given path: %s" % path)
 
@@ -144,9 +151,13 @@ class UniversalDependencyModel:
                     del group_aligned[-1]
 
                 # Append group as range
+                is_proper_name = False
+                if s.words[np_index].upostag == 'PROPN':
+                    is_proper_name = True
                 sentence_group.append({
                     'head_word': np_index + token_offset,
-                    'items': range(group_aligned[0] + token_offset, group_aligned[-1] + token_offset + 1)
+                    'items': range(group_aligned[0] + token_offset, group_aligned[-1] + token_offset + 1),
+                    'is_proper_name': is_proper_name
                 })
 
             # Append all groups of the sentence to the general collection
@@ -167,11 +178,13 @@ class UniversalDependencyModel:
         # Dependency relation to the head (amod, nmod) - https://universaldependencies.org/u/dep/index.html
         deprel = word.deprel
 
+        is_object = False
+
         # Check if the parent id is passed and POS tag is allowed
         if (not (head_id is None)) and u_pos_tag in self.np_simple_tags:
 
             # Check if its children does'nt have the comma
-            if len(word.children) > 0 and words[word.children[0]].form in self.np_strip_symbols:
+            if len(word.children) > 0 and words[word.children[0]].form in self.np_forbidden_child_symbols:
                 new_head_id = None
             else:
                 new_head_id = head_id
@@ -179,23 +192,30 @@ class UniversalDependencyModel:
         # Separately we analyze the noun and proper name
         if u_pos_tag == self.np_noun_tag or u_pos_tag == self.np_prop_tag:
             new_head_id = token_id
-
+            is_object = True
             # If it is necessary to add the current token to another group
             if not (head_id is None):
                 # Check if we can add current noun to another NP
-                # Firstly check if the type of the relation is nmod
-                if deprel == self.np_relation_nmod and words[head_id].deprel != self.np_relation_obl:
+                # Firstly check if the type of the relation is in relation array
+                if deprel in self.np_relation_child and words[head_id].deprel != self.np_relation_obl:
 
-                    # Also check if current word contains case relation
-                    j = 0
-                    is_containing_case = False
-                    while j < len(word.children):
-                        children = words[word.children[j]]
-                        if children.deprel == self.np_relation_case:
-                            is_containing_case = True
-                            break
-                        j += 1
-                    if not is_containing_case:
+                    # Check if between these words all allowed POS tags
+                    is_allowed_to_inherit = True
+
+                    # Index of the next word after the head word
+                    start = head_id + 1
+
+                    # Imagine that noun can inherit just parent located before it
+                    if start > token_id:
+                        is_allowed_to_inherit = False
+                    else:
+                        # Loop through words and check it is possible to create that inheritance
+                        while start < token_id:
+                            if not (words[start].upostag in self.np_allowed_tags):
+                                is_allowed_to_inherit = False
+                                break
+                            start += 1
+                    if is_allowed_to_inherit:
                         new_head_id = head_id
 
         # If the head word is set than add current token to its group
@@ -208,7 +228,7 @@ class UniversalDependencyModel:
         # Set default children parts as empty and all
         all_children = [[], word.children[:]]
 
-        if not (new_head_id is None):
+        if (not (new_head_id is None)) and is_object:
             # Change the tree reverse order: from the center to left and right
             # Split children on left and right parts
             left_children = [x for x in word.children if x < new_head_id]
