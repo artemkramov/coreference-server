@@ -5,11 +5,13 @@ class UniversalDependencyModel:
     # udpipe compiled model
     model = None
 
-    np_simple_tags = ['ADJ', 'DET', 'NUM', 'PRON', 'PUNCT', 'SYM']
+    np_simple_tags_pre = ['ADJ', 'NUM']
     np_noun_tag = 'NOUN'
     np_prop_tag = 'PROPN'
-    np_head_tags = [np_noun_tag, np_prop_tag]
+    np_x_tag = 'X'
+    np_head_tags = [np_noun_tag, np_prop_tag, np_x_tag]
     np_optional_tags = ['ADP', 'CCONJ']
+    np_simple_tags = np_simple_tags_pre[:]
 
     np_allowed_tags = []
 
@@ -25,8 +27,9 @@ class UniversalDependencyModel:
     def __init__(self, path):
         # Load model by the given path
         self.model = ufal.udpipe.Model.load(path)
+        self.np_simple_tags.extend(['DET', 'PRON', 'PUNCT', 'SYM'])
         self.np_allowed_tags = self.np_simple_tags[:]
-        self.np_allowed_tags.extend([self.np_noun_tag, self.np_prop_tag])
+        self.np_allowed_tags.extend(self.np_head_tags)
         if not self.model:
             raise Exception("Cannot load model by the given path: %s" % path)
 
@@ -238,6 +241,11 @@ class UniversalDependencyModel:
             else:
                 new_head_id = head_id
 
+            # Check if the token is located after head
+            # and also if this tag with such POS is allowed before
+            if token_id > head_id and u_pos_tag in self.np_simple_tags_pre:
+                new_head_id = None
+
         # Separately we analyze the noun and proper name
         if u_pos_tag in self.np_head_tags:
             new_head_id = token_id
@@ -246,7 +254,7 @@ class UniversalDependencyModel:
             if not (head_id is None):
                 # Check if we can add current noun to another NP
                 # Firstly check if the type of the relation is in relation array
-                if deprel in self.np_relation_child and words[head_id].deprel != self.np_relation_obl:
+                if deprel.split(':')[0] in self.np_relation_child and words[head_id].deprel != self.np_relation_obl:
 
                     # Check if between these words all allowed POS tags
                     is_allowed_to_inherit = True
@@ -265,12 +273,24 @@ class UniversalDependencyModel:
                                 break
                             start += 1
 
-                    # For nmod relation check if the Case morphological feature is different for objects
-                    token_case = self.fetch_morphological_feature(word.feats, 'Case')
-                    head_case = self.fetch_morphological_feature(words[head_id].feats, 'Case')
-                    if deprel == self.np_relation_nmod and token_case == head_case and \
-                            u_pos_tag == self.np_noun_tag and words[head_id].upostag == self.np_noun_tag:
-                        is_allowed_to_inherit = False
+                    # If current token is X element
+                    # Than ignore Case element
+                    if u_pos_tag != self.np_x_tag:
+                        token_case = self.fetch_morphological_feature(word.feats, 'Case')
+                        head_case = self.fetch_morphological_feature(words[head_id].feats, 'Case')
+
+                        # Cannot connect dative Case if the parent has another
+                        if token_case != head_case and token_case == ['Dat']:
+                            is_allowed_to_inherit = False
+
+                        # For nmod relation check if the Case morphological feature is different for objects
+                        # Also allow inheritance of objects which are located near each other
+                        if deprel == self.np_relation_nmod:
+                            if token_case == head_case and u_pos_tag == self.np_noun_tag and \
+                                    words[head_id].upostag == self.np_noun_tag:
+                                is_allowed_to_inherit = False
+                            if abs(head_id - token_id) != 1:
+                                is_allowed_to_inherit = False
 
                     if is_allowed_to_inherit:
                         new_head_id = head_id

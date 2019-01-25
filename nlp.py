@@ -155,27 +155,75 @@ def extract_entities(text, ner):
                 is_entity_new = False
                 break
         if is_entity_new and named_entities_model[2] > 0.4:
-            named_entities.append({
-                'items': named_entities_model[0],
-                'head_word': None,
-                'is_proper_name': True
-            })
+
+            # Check if created named entity doesn't share two sentences
+            # Find out if named entity contains the symbol of sentence separation
+            index_to_divide = -1
+            parts = [named_entities_model[0]]
+            for idx in named_entities_model[0]:
+                if tagged_words[idx]['tag'] == './SENT_END':
+                    index_to_divide = idx
+                    break
+
+            # If the sentence division was found
+            # Than split range into 2 parts around that symbol
+            if index_to_divide > -1:
+
+                # Left part before symbol
+                left_part = range(named_entities_model[0][0], index_to_divide)
+
+                # Declare start and finish indexes for right part
+                right_part_start = index_to_divide + 1
+                if tagged_words[index_to_divide + 1]['word'] == '<root>':
+                    right_part_start += 1
+                right_part_end = named_entities_model[0][-1] + 1
+                if right_part_start < right_part_end:
+                    right_part = range(right_part_start, right_part_end)
+                else:
+                    right_part = []
+
+                parts = [left_part, right_part]
+            for part in parts:
+                if isinstance(part, (range,)):
+
+                    # Check if start and finish items of group doesn't contain <root>
+                    start_number = part[0]
+                    finish_number = part[-1] + 1
+                    if tagged_words[start_number]['word'] == '<root>':
+                        start_number += 1
+                    if tagged_words[finish_number]['word'] == '<root>':
+                        finish_number -= 1
+
+                    named_entities.append({
+                        'items': range(start_number, finish_number),
+                        'head_word': None,
+                        'is_proper_name': True
+                    })
 
     # Extract noun phrases from text but with excluding of the named entities
     ud_groups = ud_model.extract_noun_phrases(sentences, [])
     new_ud_groups = []
     for ud_group in ud_groups:
         is_intersection = False
+
+        # Loop through each entity and check if items of UD group and named entity intersects
+        # If intersection is detected than merge it groups into one
         for named_entity in named_entities:
             if len(set(named_entity['items']).intersection(set(ud_group['items']))) > 0:
+                # Merge groups and sort indexes inside it to form range
                 is_intersection = True
                 items = list(set(named_entity['items']).union(set(ud_group['items'])))
                 items.sort()
                 group_items = range(items[0], items[-1] + 1)
+
+                # Reset range for the current named entity and replace another parameters
+                # with corresponding UD group attributes
                 named_entity['items'] = group_items
                 named_entity['head_word'] = ud_group['head_word']
                 named_entity['is_proper_name'] = ud_group['is_proper_name']
                 break
+
+        # If we don't detect any intersection than just simply add new group
         if not is_intersection:
             new_ud_groups.append({
                 'items': ud_group['items'],
@@ -184,6 +232,7 @@ def extract_entities(text, ner):
             })
 
     named_entities.extend(new_ud_groups)
+
     # Form list of positions which are used in the named entity
     # It is used for ignoring of them further
     exclude_entities_index = []
@@ -196,27 +245,29 @@ def extract_entities(text, ner):
 
         for i in named_entity['items']:
 
-            # Check if entity group doesn't contain dot symbol
-            # which represents the end of the sentence
-            token = tagged_words[i]
-            if token['tag'] == './SENT_END':
-                if i == 0:
-                    continue
-                else:
-                    break
+            # Append index of the each token of named entity
+            # Also append it to exclude list for the following processing
             named_entities_index.append(i)
             exclude_entities_index.append(i)
+
+            # Set it as entity, add common group and set proper name attribute
             tagged_words[i]['isEntity'] = True
             tagged_words[i]['groupID'] = group_id
             if named_entity['is_proper_name']:
                 tagged_words[i]['isProperName'] = True
+
+            # Set head word flag
             if i == named_entity['head_word'] and (not (named_entity['head_word'] is None)):
                 tagged_words[i]['isHeadWord'] = True
 
+        # Set common group word which concatenates all group words
+        # Set group length
+        # Attributes mentioned above should be set just for the first member of group
         group_word = " ".join(tagged_words[i]['word'] for i in named_entities_index)
         group_length = len(named_entities_index)
         tagged_words[named_entities_index[0]]['groupLength'] = group_length
         tagged_words[named_entities_index[0]]['groupWord'] = group_word
+
         # Convert range to list for JSON serialization
         named_entities_range.append(named_entities_index)
     entities = []
