@@ -5,9 +5,10 @@ class UniversalDependencyModel:
     # udpipe compiled model
     model = None
 
-    np_simple_tags_pre = ['ADJ', 'NUM']
+    np_simple_tags_pre = ['ADJ', 'NUM', 'DET']
     np_noun_tag = 'NOUN'
     np_prop_tag = 'PROPN'
+    np_pron_tag = 'PRON'
     np_x_tag = 'X'
     np_head_tags = [np_noun_tag, np_prop_tag, np_x_tag]
     np_optional_tags = ['ADP', 'CCONJ']
@@ -83,6 +84,7 @@ class UniversalDependencyModel:
         sentences_groups = []
         token_offset = 0
         named_entities_indexes = []
+        levels = {}
         for r in named_entities:
             named_entities_indexes.extend(list(r))
 
@@ -108,6 +110,9 @@ class UniversalDependencyModel:
             # Find groups with head nouns and corresponding tokens
             groups = {}
             self.np_recursive_extractor(word_root, s.words, groups, named_entities_indexes, token_offset, None)
+
+            # Find levels for each word
+            levels.update(self.np_write_levels(word_root, s.words, 0, token_offset))
 
             # Fix token sequence inside each NP group
             # It is necessary to remove all spaces inside the group
@@ -168,7 +173,7 @@ class UniversalDependencyModel:
             # Append all groups of the sentence to the general collection
             sentences_groups.extend(sentence_group)
             token_offset += len(s.words)
-        return sentences_groups
+        return sentences_groups, levels
 
     # Parse tag string (like Animacy=Inan|Case=Loc|Gender=Masc|Number=Sing
     @staticmethod
@@ -216,6 +221,18 @@ class UniversalDependencyModel:
         if len(group) > 1 and getattr(words[group[-1]], attribute) in detect_group:
             del group[-1]
 
+    # Traverse through tree and write levels of each word
+    def np_write_levels(self, word, words, level, offset):
+        levels = {
+            word.id + offset: level
+        }
+        level += 1
+        i = 0
+        while i < len(word.children):
+            levels.update(self.np_write_levels(words[word.children[i]], words, level, offset))
+            i += 1
+        return levels
+
     # Traverse the syntactic tree and find noun phrases
     def np_recursive_extractor(self, word, words, groups, named_entity_indexes, offset, head_id=None):
         if groups is None:
@@ -243,12 +260,16 @@ class UniversalDependencyModel:
 
             # Check if the token is located after head
             # and also if this tag with such POS is allowed before
-            if token_id > head_id and u_pos_tag in self.np_simple_tags_pre:
+            if token_id > head_id and token_id in words[head_id].children and u_pos_tag in self.np_simple_tags_pre:
+                new_head_id = None
+
+            if u_pos_tag == self.np_pron_tag and self.fetch_morphological_feature(word.feats, 'PronType') == ['Prs']:
                 new_head_id = None
 
         # Separately we analyze the noun and proper name
         if u_pos_tag in self.np_head_tags:
             new_head_id = token_id
+
             is_object = True
             # If it is necessary to add the current token to another group
             if not (head_id is None):
@@ -286,11 +307,17 @@ class UniversalDependencyModel:
                         # For nmod relation check if the Case morphological feature is different for objects
                         # Also allow inheritance of objects which are located near each other
                         if deprel == self.np_relation_nmod:
-                            if token_case == head_case and u_pos_tag == self.np_noun_tag and \
+                            if token_case == 'Nom' and u_pos_tag == self.np_noun_tag and \
                                     words[head_id].upostag == self.np_noun_tag:
                                 is_allowed_to_inherit = False
-                            if abs(head_id - token_id) != 1:
-                                is_allowed_to_inherit = False
+
+                            if words[head_id].deprel == self.np_relation_nmod:
+                                i = head_id + 1
+                                while i < token_id:
+                                    if (not (words[i].upostag in self.np_head_tags)) or words[i].deprel != self.np_relation_nmod:
+                                        is_allowed_to_inherit = False
+                                        break
+                                    i += 1
 
                     if is_allowed_to_inherit:
                         new_head_id = head_id

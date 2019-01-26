@@ -186,52 +186,62 @@ def extract_entities(text, ner):
             for part in parts:
                 if isinstance(part, (range,)):
 
-                    # Check if start and finish items of group doesn't contain <root>
-                    start_number = part[0]
-                    finish_number = part[-1] + 1
-                    if tagged_words[start_number]['word'] == '<root>':
-                        start_number += 1
-                    if tagged_words[finish_number]['word'] == '<root>':
-                        finish_number -= 1
+                    if len(part) > 0:
+                        # Check if start and finish items of group doesn't contain <root>
+                        start_number = part[0]
+                        finish_number = part[-1] + 1
+                        if tagged_words[start_number]['word'] == '<root>':
+                            start_number += 1
+                        if tagged_words[finish_number]['word'] == '<root>':
+                            finish_number -= 1
 
-                    named_entities.append({
-                        'items': range(start_number, finish_number),
-                        'head_word': None,
-                        'is_proper_name': True
-                    })
+                        named_entities.append({
+                            'items': range(start_number, finish_number),
+                            'head_word': None,
+                            'is_proper_name': True
+                        })
 
     # Extract noun phrases from text but with excluding of the named entities
-    ud_groups = ud_model.extract_noun_phrases(sentences, [])
-    new_ud_groups = []
+    ud_groups, ud_levels = ud_model.extract_noun_phrases(sentences, [])
     for ud_group in ud_groups:
-        is_intersection = False
-
-        # Loop through each entity and check if items of UD group and named entity intersects
-        # If intersection is detected than merge it groups into one
-        for named_entity in named_entities:
-            if len(set(named_entity['items']).intersection(set(ud_group['items']))) > 0:
-                # Merge groups and sort indexes inside it to form range
-                is_intersection = True
-                items = list(set(named_entity['items']).union(set(ud_group['items'])))
-                items.sort()
-                group_items = range(items[0], items[-1] + 1)
-
-                # Reset range for the current named entity and replace another parameters
-                # with corresponding UD group attributes
-                named_entity['items'] = group_items
-                named_entity['head_word'] = ud_group['head_word']
-                named_entity['is_proper_name'] = ud_group['is_proper_name']
-                break
-
-        # If we don't detect any intersection than just simply add new group
-        if not is_intersection:
-            new_ud_groups.append({
+        named_entities.append({
                 'items': ud_group['items'],
                 'head_word': ud_group['head_word'],
                 'is_proper_name': ud_group['is_proper_name']
             })
 
-    named_entities.extend(new_ud_groups)
+    # Sort named entities by the start range value
+    named_entities.sort(key=lambda group: group['items'][0])
+
+    # Merge all named entities that has intersection
+    current_entity_idx = 0
+    named_entities_aligned = []
+    while current_entity_idx < len(named_entities):
+        i = current_entity_idx
+        current_group = named_entities[current_entity_idx]
+        while i < len(named_entities) - 1:
+            current_entity_idx = i + 1
+
+            # Check for intersection
+            if len(set(current_group['items']).intersection(named_entities[i + 1]['items'])) > 0:
+                items = list(set(current_group['items']).union(set(named_entities[i + 1]['items'])))
+                items.sort()
+                group_items = range(items[0], items[-1] + 1)
+                current_group['items'] = group_items
+                current_group['is_proper_name'] = current_group['is_proper_name'] and named_entities[i + 1][
+                    'is_proper_name']
+                if not (named_entities[i + 1]['head_word'] is None):
+                    if current_group['head_word'] is None or ud_levels[named_entities[i + 1]['head_word']] < \
+                            current_group['head_word']:
+                        current_group['head_word'] = named_entities[i + 1]['head_word']
+                i += 1
+            else:
+                break
+        named_entities_aligned.append(current_group)
+        if current_entity_idx == len(named_entities) - 1:
+            break
+
+    named_entities = named_entities_aligned
 
     # Form list of positions which are used in the named entity
     # It is used for ignoring of them further
