@@ -9,6 +9,7 @@ from universal_dependency_model import UniversalDependencyModel
 import db
 import csv
 import string
+import dateparser.search as DateSearch
 
 # Encoding of the files
 ENCODING = 'utf-8'
@@ -25,9 +26,10 @@ gazetteer = []
 with open('gazetteers\\gazetteer.csv', encoding='utf-8') as f:
     reader = csv.reader(f)
     for row in reader:
-        gazetteer.append(row[0])
-    # For test purpose cut size
-    # gazetteer = gazetteer[:10]
+        gazetteer.append({
+            'type': 'gazetteer',
+            'text': row[0]
+        })
 
 # Set Babelfy client entity for working with remote API
 babelfy = Babelfy()
@@ -44,14 +46,29 @@ def preprocess_text_with_gazetteer(text):
     # List with ranges of all found gazetteer entities
     gazetteer_entities = []
 
+    # Try to detect dates inside the raw text
+    # 'uk' parameter means that we're working with Ukrainian text
+    date_matches = DateSearch.search_dates(text, languages=['uk'])
+    if date_matches is None:
+        dates = []
+    else:
+        dates = [{
+            'type': 'date',
+            'text': date[0]
+        } for date in date_matches]
+
+    # Copy gazetteer value and append detected dates
+    term_db = gazetteer.copy()
+    term_db.extend(dates)
+
     # Loop through gazetteer terms and try to find matches
-    for term in gazetteer:
+    for term in term_db:
         # Apply regular expression and generate list of tuples (start, end) with all occurrences
-        term_occurrences = [(m.start(), m.start() + len(term)) for m in re.finditer(term, text)]
+        term_occurrences = [(m.start(), m.start() + len(term['text'])) for m in re.finditer(term['text'], text)]
         if len(term_occurrences) > 0:
             # Parse term to form the tokens which will replace UUID
             tokens = []
-            term_sentences = ud_model.tokenize(term)
+            term_sentences = ud_model.tokenize(term['text'])
             for s in term_sentences:
                 i = 0
                 while i < len(s.words):
@@ -61,9 +78,15 @@ def preprocess_text_with_gazetteer(text):
                     i += 1
 
             # Add entity to gazetteer vocabulary
+            is_proper_name = True
+            is_merge_allowed = False
+            if term['type'] != 'gazetteer':
+                is_proper_name = False
             gazetteer_entity_pointers.append({
-                'term': term,
-                'tokens': tokens
+                'term': term['text'],
+                'tokens': tokens,
+                'is_proper_name': is_proper_name,
+                'is_merge_allowed': is_merge_allowed
             })
     # Tokenize the whole text
     sentences = ud_model.tokenize(text)
@@ -94,12 +117,29 @@ def preprocess_text_with_gazetteer(text):
                     gazetteer_entities.append({
                         'items': range(i + sentence_offset, clique_end + sentence_offset),
                         'head_word': None,
-                        'is_proper_name': True
+                        'is_proper_name': gazetteer_entity_pointer['is_proper_name'],
+                        'is_merge_allowed': gazetteer_entity_pointer['is_merge_allowed']
                     })
                 i += 1
             sentence_offset += len(s.words)
 
     return gazetteer_entities
+
+
+# Find all dates inside the text
+def find_dates_in_text(text):
+
+    # Try to detect dates inside the raw text
+    # 'uk' parameter means that we're working with Ukrainian text
+    matches = DateSearch.search_dates(text, languages=['uk'])
+
+    # Extract all date strings
+    dates = [{
+        date[0]
+    }
+        for date in matches]
+
+    return dates
 
 
 # Extract all named entities and nouns/pronouns from text
@@ -219,27 +259,61 @@ def extract_entities(text, ner):
     while current_entity_idx < len(named_entities):
         i = current_entity_idx
         current_group = named_entities[current_entity_idx]
-        while i < len(named_entities) - 1:
-            current_entity_idx = i + 1
+        if len(current_group['items']) > 0:
+            while i < len(named_entities) - 1:
+                current_entity_idx = i + 1
 
-            # Check for intersection
-            if len(set(current_group['items']).intersection(named_entities[i + 1]['items'])) > 0:
-                items = list(set(current_group['items']).union(set(named_entities[i + 1]['items'])))
-                items.sort()
-                group_items = range(items[0], items[-1] + 1)
-                current_group['items'] = group_items
-                current_group['is_proper_name'] = current_group['is_proper_name'] and named_entities[i + 1][
-                    'is_proper_name']
-                if not (named_entities[i + 1]['head_word'] is None):
-                    if current_group['head_word'] is None or ud_levels[named_entities[i + 1]['head_word']] < \
-                            current_group['head_word']:
-                        current_group['head_word'] = named_entities[i + 1]['head_word']
-                i += 1
-            else:
+                is_merge_allowed = True
+                if (not current_group.get('is_merge_allowed', True)) or (not named_entities[i + 1].get('is_merge_allowed', True)):
+                    is_merge_allowed = False
+
+                # Check for intersection
+                if len(set(current_group['items']).intersection(named_entities[i + 1]['items'])) > 0:
+
+                    if not is_merge_allowed:
+                        current_group_set = set(current_group['items'])
+                        next_named_entity_set = set(named_entities[i + 1]['items'])
+                        if not current_group.get('is_merge_allowed', True):
+                            next_named_entity_set.difference_update(current_group_set)
+                        else:
+                            current_group_set.difference_update(next_named_entity_set)
+                        if len(current_group_set) == 0:
+                            current_group['items'] = []
+                            break
+                        if len(next_named_entity_set) == 0:
+                            named_entities[i + 1]['items'] = []
+                            break
+                        tmp_items = sorted(current_group_set)
+                        current_group['items'] = range(tmp_items[0], tmp_items[-1] + 1)
+                        tmp_items = sorted(next_named_entity_set)
+                        named_entities[i + 1]['items'] = range(tmp_items[0], tmp_items[-1] + 1)
+                        break
+                    else:
+                        # Convert range to sets
+                        # And perform union operation on intersected ranges
+                        items = list(set(current_group['items']).union(set(named_entities[i + 1]['items'])))
+                        items.sort()
+                        group_items = range(items[0], items[-1] + 1)
+                        current_group['items'] = group_items
+
+                        # Compare head words of groups
+                        # If the head word of the next group is determined
+                        # and it's located above the head word of the current group
+                        # than we reset head word and proper name flag for current group
+                        if not (named_entities[i + 1]['head_word'] is None):
+                            if current_group['head_word'] is None or ud_levels[named_entities[i + 1]['head_word']] < \
+                                    current_group['head_word']:
+                                current_group['head_word'] = named_entities[i + 1]['head_word']
+                                current_group['is_proper_name'] = named_entities[i + 1]['is_proper_name']
+                    i += 1
+                else:
+                    break
+            if len(current_group['items']) > 0:
+                named_entities_aligned.append(current_group)
+            if current_entity_idx == len(named_entities) - 1:
                 break
-        named_entities_aligned.append(current_group)
-        if current_entity_idx == len(named_entities) - 1:
-            break
+        else:
+            current_entity_idx += 1
 
     named_entities = named_entities_aligned
 

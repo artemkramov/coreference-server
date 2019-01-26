@@ -22,7 +22,7 @@ class UniversalDependencyModel:
 
     np_relation_child = ['nmod', 'compound', 'fixed', 'flat']
 
-    np_strip_symbols = [',', ')', '(', '-', '"', ':', '»', '«']
+    np_strip_symbols = [',', ')', '(', '-', '"', ':', '»', '«', '–']
     np_forbidden_child_symbols = [',', ')', '(', ':']
 
     def __init__(self, path):
