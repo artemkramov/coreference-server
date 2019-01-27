@@ -48,7 +48,11 @@ def preprocess_text_with_gazetteer(text):
 
     # Try to detect dates inside the raw text
     # 'uk' parameter means that we're working with Ukrainian text
-    date_matches = DateSearch.search_dates(text, languages=['uk'])
+    date_matches = None
+    try:
+        date_matches = DateSearch.search_dates(text, languages=['uk'])
+    except Exception:
+        date_matches = None
     if date_matches is None:
         dates = []
     else:
@@ -64,7 +68,10 @@ def preprocess_text_with_gazetteer(text):
     # Loop through gazetteer terms and try to find matches
     for term in term_db:
         # Apply regular expression and generate list of tuples (start, end) with all occurrences
-        term_occurrences = [(m.start(), m.start() + len(term['text'])) for m in re.finditer(term['text'], text)]
+        try:
+            term_occurrences = [(m.start(), m.start() + len(term['text'])) for m in re.finditer(term['text'], text)]
+        except Exception:
+            term_occurrences = []
         if len(term_occurrences) > 0:
             # Parse term to form the tokens which will replace UUID
             tokens = []
@@ -82,12 +89,13 @@ def preprocess_text_with_gazetteer(text):
             is_merge_allowed = False
             if term['type'] != 'gazetteer':
                 is_proper_name = False
-            gazetteer_entity_pointers.append({
-                'term': term['text'],
-                'tokens': tokens,
-                'is_proper_name': is_proper_name,
-                'is_merge_allowed': is_merge_allowed
-            })
+            if not (any(pointer['term'] == term['text'] for pointer in gazetteer_entity_pointers)):
+                gazetteer_entity_pointers.append({
+                    'term': term['text'],
+                    'tokens': tokens,
+                    'is_proper_name': is_proper_name,
+                    'is_merge_allowed': is_merge_allowed
+                })
     # Tokenize the whole text
     sentences = ud_model.tokenize(text)
 
@@ -124,22 +132,6 @@ def preprocess_text_with_gazetteer(text):
             sentence_offset += len(s.words)
 
     return gazetteer_entities
-
-
-# Find all dates inside the text
-def find_dates_in_text(text):
-
-    # Try to detect dates inside the raw text
-    # 'uk' parameter means that we're working with Ukrainian text
-    matches = DateSearch.search_dates(text, languages=['uk'])
-
-    # Extract all date strings
-    dates = [{
-        date[0]
-    }
-        for date in matches]
-
-    return dates
 
 
 # Extract all named entities and nouns/pronouns from text
@@ -235,11 +227,13 @@ def extract_entities(text, ner):
                         if tagged_words[finish_number]['word'] == '<root>':
                             finish_number -= 1
 
-                        named_entities.append({
-                            'items': range(start_number, finish_number),
-                            'head_word': None,
-                            'is_proper_name': True
-                        })
+                        if start_number < finish_number:
+                            named_entities.append({
+                                'items': range(start_number, finish_number),
+                                'head_word': None,
+                                'is_proper_name': True,
+                                'is_merge_allowed': False
+                            })
 
     # Extract noun phrases from text but with excluding of the named entities
     ud_groups, ud_levels = ud_model.extract_noun_phrases(sentences, [])
@@ -256,12 +250,12 @@ def extract_entities(text, ner):
     # Merge all named entities that has intersection
     current_entity_idx = 0
     named_entities_aligned = []
+    exclude_idx = []
     while current_entity_idx < len(named_entities):
         i = current_entity_idx
         current_group = named_entities[current_entity_idx]
-        if len(current_group['items']) > 0:
+        if len(current_group['items']) > 0 and (not (current_entity_idx in exclude_idx)):
             while i < len(named_entities) - 1:
-                current_entity_idx = i + 1
 
                 is_merge_allowed = True
                 if (not current_group.get('is_merge_allowed', True)) or (not named_entities[i + 1].get('is_merge_allowed', True)):
@@ -282,12 +276,12 @@ def extract_entities(text, ner):
                             break
                         if len(next_named_entity_set) == 0:
                             named_entities[i + 1]['items'] = []
-                            break
-                        tmp_items = sorted(current_group_set)
+                        tmp_items = fix_divided_set(sorted(current_group_set))
+
                         current_group['items'] = range(tmp_items[0], tmp_items[-1] + 1)
-                        tmp_items = sorted(next_named_entity_set)
-                        named_entities[i + 1]['items'] = range(tmp_items[0], tmp_items[-1] + 1)
-                        break
+                        if len(next_named_entity_set) > 0:
+                            tmp_items = fix_divided_set(sorted(next_named_entity_set))
+                            named_entities[i + 1]['items'] = range(tmp_items[0], tmp_items[-1] + 1)
                     else:
                         # Convert range to sets
                         # And perform union operation on intersected ranges
@@ -295,6 +289,7 @@ def extract_entities(text, ner):
                         items.sort()
                         group_items = range(items[0], items[-1] + 1)
                         current_group['items'] = group_items
+                        exclude_idx.append(i + 1)
 
                         # Compare head words of groups
                         # If the head word of the next group is determined
@@ -312,8 +307,7 @@ def extract_entities(text, ner):
                 named_entities_aligned.append(current_group)
             if current_entity_idx == len(named_entities) - 1:
                 break
-        else:
-            current_entity_idx += 1
+        current_entity_idx += 1
 
     named_entities = named_entities_aligned
 
@@ -381,6 +375,20 @@ def extract_entities(text, ner):
         "entities": entities
     }
     return summary
+
+
+def fix_divided_set(group_list):
+    group_aligned = set()
+    i = 0
+    if len(group_list) == 1:
+        return group_list
+    while i < len(group_list) - 1:
+        if group_list[i] + 1 == group_list[i + 1]:
+            group_aligned.update([group_list[i], group_list[i + 1]])
+        else:
+            break
+        i += 1
+    return sorted(group_aligned)
 
 
 # Save token with the given parameters
