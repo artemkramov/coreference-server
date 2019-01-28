@@ -94,6 +94,7 @@ class UniversalDependencyModel:
             word_root_index = -1
 
             # Loop through words of the sentence and find out root word
+            root_index = -1
             while i < len(s.words):
                 word = s.words[i]
 
@@ -101,7 +102,8 @@ class UniversalDependencyModel:
                 # and set index
                 if word.head == 0:
                     word_root_index = i
-                    break
+                if word.id == 0:
+                    root_index = i
                 i += 1
 
             # Retrieve root word
@@ -112,7 +114,7 @@ class UniversalDependencyModel:
             self.np_recursive_extractor(word_root, s.words, groups, named_entities_indexes, token_offset, None)
 
             # Find levels for each word
-            levels.update(self.np_write_levels(word_root, s.words, 0, token_offset))
+            levels.update(self.np_write_levels(s.words[root_index], s.words, 0, token_offset))
 
             # Fix token sequence inside each NP group
             # It is necessary to remove all spaces inside the group

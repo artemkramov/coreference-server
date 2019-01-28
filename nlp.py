@@ -254,6 +254,16 @@ def extract_entities(text, ner):
     while current_entity_idx < len(named_entities):
         i = current_entity_idx
         current_group = named_entities[current_entity_idx]
+
+        # Set head word if it's a None
+        # Head word we set as the highest element corresponding to tree
+        if current_group['head_word'] is None and len(current_group['items']) > 0:
+            current_group_head_word = current_group['items'][0]
+            for word_id in current_group['items']:
+                if ud_levels[word_id] < ud_levels[current_group_head_word]:
+                    current_group_head_word = word_id
+            current_group['head_word'] = current_group_head_word
+
         if len(current_group['items']) > 0 and (not (current_entity_idx in exclude_idx)):
             while i < len(named_entities) - 1:
 
@@ -277,11 +287,12 @@ def extract_entities(text, ner):
                         if len(next_named_entity_set) == 0:
                             named_entities[i + 1]['items'] = []
                         tmp_items = fix_divided_set(sorted(current_group_set))
-
-                        current_group['items'] = range(tmp_items[0], tmp_items[-1] + 1)
+                        if len(tmp_items) > 0:
+                            current_group['items'] = range(tmp_items[0], tmp_items[-1] + 1)
                         if len(next_named_entity_set) > 0:
                             tmp_items = fix_divided_set(sorted(next_named_entity_set))
-                            named_entities[i + 1]['items'] = range(tmp_items[0], tmp_items[-1] + 1)
+                            if len(tmp_items) > 0:
+                                named_entities[i + 1]['items'] = range(tmp_items[0], tmp_items[-1] + 1)
                     else:
                         # Convert range to sets
                         # And perform union operation on intersected ranges
@@ -364,6 +375,7 @@ def extract_entities(text, ner):
             if is_personal_pronoun or token['pos'] == 'PROPN' or token['pos'] == 'X':
                 entities.append(position)
                 tagged_words[position]['isEntity'] = True
+                tagged_words[position]['isHeadWord'] = True
 
             # Check if proper name was detected
             if token['pos'] == 'PROPN':
