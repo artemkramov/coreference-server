@@ -21,3 +21,4 @@ class Word(Base):
     EntityID = Column(String)
     RawTagString = Column(String)
     CoreferenceGroupID = Column(String)
+    RemoteIPAddress = Column(String)

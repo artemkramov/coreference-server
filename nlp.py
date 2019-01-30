@@ -421,7 +421,7 @@ def save_token(parameters):
 
 
 # Save all tokens with corresponding groups
-def save_tokens(entities):
+def save_tokens(entities, remote_ip_address):
     # Word order in the document
     word_order = 0
 
@@ -463,7 +463,8 @@ def save_tokens(entities):
                     'RawTagString': token['tag'],
                     'IsHeadWord': token['isHeadWord'],
                     'IsProperName': token['isProperName'],
-                    'PartOfSpeech': token['pos']
+                    'PartOfSpeech': token['pos'],
+                    'RemoteIPAddress': remote_ip_address
                 }
                 save_token(parameters)
                 word_order += 1
@@ -482,7 +483,8 @@ def save_tokens(entities):
                 'RawTagString': entity['tag'],
                 'IsHeadWord': entity['isHeadWord'],
                 'IsProperName': entity['isProperName'],
-                'PartOfSpeech': entity['pos']
+                'PartOfSpeech': entity['pos'],
+                'RemoteIPAddress': remote_ip_address
             }
             save_token(parameters)
             word_order += 1

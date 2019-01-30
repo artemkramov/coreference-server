@@ -28,7 +28,7 @@ def extractor():
 @app.route('/save', methods=['POST'])
 def save_clusters():
     content = request.get_json()
-    nlp.save_tokens(content)
+    nlp.save_tokens(content, request.access_route[0])
     return jsonify({})
 
 
