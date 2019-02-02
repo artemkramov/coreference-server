@@ -224,7 +224,7 @@ def extract_entities(text, ner):
                         finish_number = part[-1] + 1
                         if tagged_words[start_number]['word'] == '<root>':
                             start_number += 1
-                        if tagged_words[finish_number]['word'] == '<root>':
+                        if finish_number < len(tagged_words) and tagged_words[finish_number]['word'] == '<root>':
                             finish_number -= 1
 
                         if start_number < finish_number:
