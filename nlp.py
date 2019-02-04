@@ -186,7 +186,7 @@ def extract_entities(text, ner):
             if len(set(gazetteer_entity['items']).intersection(named_entities_model[0])) > 0:
                 is_entity_new = False
                 break
-        if is_entity_new and named_entities_model[2] > 0.4:
+        if is_entity_new and named_entities_model[2] > 0.6:
 
             # Check if created named entity doesn't share two sentences
             # Find out if named entity contains the symbol of sentence separation
