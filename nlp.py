@@ -17,8 +17,7 @@ ENCODING = 'utf-8'
 # Global variable which is used for handling of the buffer output
 output = ""
 
-# Database session marker
-db_session = db.session()
+
 
 # Load gazetteers
 print('Loading gazetteer...')
@@ -416,6 +415,8 @@ def save_token(parameters):
     is_plural, gender = ud_model.parse_tag(parameters['RawTagString'])
     token.IsPlural = is_plural
     token.Gender = gender
+    # Database session marker
+    db_session = db.session()
     db_session.add(token)
     db_session.commit()
 
