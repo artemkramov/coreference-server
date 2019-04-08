@@ -134,7 +134,7 @@ def preprocess_text_with_gazetteer(text):
 
 
 # Extract all named entities and nouns/pronouns from text
-def extract_entities(text, ner):
+def extract_entities(text, ner, is_entity_detection=False):
     tokens = []
     tagged_words = []
 
@@ -143,6 +143,12 @@ def extract_entities(text, ner):
 
     # Parse text with UD
     sentences = ud_model.tokenize(text)
+
+    # List to include all tokens as entity
+    # It is necessary to perform noun phrases evaluation
+    detected_tokens = []
+
+    token_position = 0
 
     for s in sentences:
         ud_model.tag(s)
@@ -169,9 +175,21 @@ def extract_entities(text, ner):
                 'groupWord': None,
                 'pos': word.upostag
             }
+            if is_entity_detection:
+                tagged_word['isEntity'] = True
+                detected_tokens.append(token_position)
+                token_position += 1
             tagged_words.append(tagged_word)
+
             # print(word.feats)
             i += 1
+
+    if is_entity_detection:
+        return {
+            "tokens": tagged_words,
+            "named_entities": [],
+            "entities": detected_tokens
+        }
 
     # Apply NER model for searching of named entities
     named_entities_models = ner.extract_entities(tokens)
