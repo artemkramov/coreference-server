@@ -134,7 +134,7 @@ def preprocess_text_with_gazetteer(text):
 
 
 # Extract all named entities and nouns/pronouns from text
-def extract_entities(text, ner, is_entity_detection=False):
+def extract_entities(text, ner, is_entity_detection=False, without_ner=False, without_ud_parser=False):
     tokens = []
     tagged_words = []
 
@@ -192,7 +192,9 @@ def extract_entities(text, ner, is_entity_detection=False):
         }
 
     # Apply NER model for searching of named entities
-    named_entities_models = ner.extract_entities(tokens)
+    named_entities_models = []
+    if not without_ner:
+        named_entities_models = ner.extract_entities(tokens)
 
     # Add named entities that were found
     # But check if their does'nt intersect with gazetteer data
@@ -254,6 +256,8 @@ def extract_entities(text, ner, is_entity_detection=False):
 
     # Extract noun phrases from text but with excluding of the named entities
     ud_groups, ud_levels = ud_model.extract_noun_phrases(sentences, [])
+    if without_ud_parser:
+        ud_groups = []
     for ud_group in ud_groups:
         named_entities.append({
                 'items': ud_group['items'],
@@ -389,7 +393,7 @@ def extract_entities(text, ner, is_entity_detection=False):
             if token['pos'] == 'PRON' and tag_string.find("PronType=Prs") > -1:
                 is_personal_pronoun = True
 
-            if is_personal_pronoun or token['pos'] == 'PROPN' or token['pos'] == 'X':
+            if is_personal_pronoun or token['pos'] == 'PROPN' or token['pos'] == 'X' or token['pos'] == 'NOUN':
                 entities.append(position)
                 tagged_words[position]['isEntity'] = True
                 tagged_words[position]['isHeadWord'] = True

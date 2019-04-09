@@ -58,7 +58,7 @@ class NounPhrases:
         print("F1: {0}".format(f1))
 
     # Get metrics to estimate accuracy
-    def get_metrics(self):
+    def get_metrics(self, without_ner=False, without_ud_parser=False):
 
         # Init all metrics
         true_positives_exact = 0
@@ -72,12 +72,13 @@ class NounPhrases:
         for document_id in self.documents:
 
             tokens_gold = self.documents[document_id]
+            # print(document_id)
 
             # Get raw text of the document from DB
             document_db = self.db_session.query(DBText).filter(DBText.DocumentID == document_id).one()
 
             # Extract entities from the text given
-            tagged_data = nlp.extract_entities(document_db.RawText, self.ner)
+            tagged_data = nlp.extract_entities(document_db.RawText, self.ner, False, without_ner, without_ud_parser)
 
             # Remove <root> token from the parsed result
             tokens_tag = [token for token in tagged_data['tokens'] if token['word'] != '<root>']
@@ -192,4 +193,18 @@ class NounPhrases:
 
 np = NounPhrases()
 np.get_all_documents()
+
+print("")
+print("Metrics for all elements")
 np.get_metrics()
+print(25*"=")
+
+print("")
+print("Metrics without NER")
+np.get_metrics(without_ner=True)
+print(25*"=")
+
+print("")
+print("Metrics without UD parser")
+np.get_metrics(without_ud_parser=True)
+print(25*"=")
