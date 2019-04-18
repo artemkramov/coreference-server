@@ -85,7 +85,7 @@ def preprocess_text_with_gazetteer(text):
 
             # Add entity to gazetteer vocabulary
             is_proper_name = True
-            is_merge_allowed = False
+            is_merge_allowed = True
             if term['type'] != 'gazetteer':
                 is_proper_name = False
             if not (any(pointer['term'] == term['text'] for pointer in gazetteer_entity_pointers)):
@@ -205,7 +205,7 @@ def extract_entities(text, ner, is_entity_detection=False, without_ner=False, wi
             if len(set(gazetteer_entity['items']).intersection(named_entities_model[0])) > 0:
                 is_entity_new = False
                 break
-        if is_entity_new and named_entities_model[2] > 0.6:
+        if is_entity_new and named_entities_model[2] > 0.8:
 
             # Check if created named entity doesn't share two sentences
             # Find out if named entity contains the symbol of sentence separation
@@ -251,7 +251,7 @@ def extract_entities(text, ner, is_entity_detection=False, without_ner=False, wi
                                 'items': range(start_number, finish_number),
                                 'head_word': None,
                                 'is_proper_name': True,
-                                'is_merge_allowed': False
+                                'is_merge_allowed': True
                             })
 
     # Extract noun phrases from text but with excluding of the named entities

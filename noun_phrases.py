@@ -32,6 +32,8 @@ class NounPhrases:
         # Group every token by document
         for token in tokens:
             if not (token.DocumentID in documents):
+                # if len(documents.keys()) > 4:
+                #     break
                 documents[token.DocumentID] = []
             documents[token.DocumentID].append(token)
 

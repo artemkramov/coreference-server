@@ -21,7 +21,7 @@ ner = named_entity_extractor('uk_model.dat')
 def extractor():
     content = request.get_json()
     # Extract all tokens, entities and named entities together with tags from the text
-    tagged_data = nlp.extract_entities(content['text'], ner, True)
+    tagged_data = nlp.extract_entities(content['text'], ner, False)
     return jsonify(tagged_data)
 
 
