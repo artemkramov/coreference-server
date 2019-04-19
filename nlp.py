@@ -88,6 +88,8 @@ def preprocess_text_with_gazetteer(text):
             is_merge_allowed = True
             if term['type'] != 'gazetteer':
                 is_proper_name = False
+                if len(tokens) > 2:
+                    is_merge_allowed = False
             if not (any(pointer['term'] == term['text'] for pointer in gazetteer_entity_pointers)):
                 gazetteer_entity_pointers.append({
                     'term': term['text'],

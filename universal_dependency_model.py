@@ -5,13 +5,14 @@ class UniversalDependencyModel:
     # udpipe compiled model
     model = None
 
-    np_simple_tags_pre = ['ADJ', 'ADV', 'ADP', 'DET', 'AUX', 'NUM', 'VERB', 'CCONJ']
+    np_simple_tags_pre = ['ADJ', 'ADV', 'ADP', 'NUM', 'VERB', 'CCONJ', 'PUNCT']
     np_noun_tag = 'NOUN'
     np_prop_tag = 'PROPN'
     np_pron_tag = 'PRON'
+    np_det_tag = 'DET'
     np_verb_tag = 'VERB'
     np_x_tag = 'X'
-    np_head_tags = [np_noun_tag, np_prop_tag, np_x_tag]
+    np_head_tags = [np_noun_tag, np_prop_tag, np_x_tag, np_det_tag]
     np_optional_tags = ['ADP', 'CCONJ']
     np_simple_tags = np_simple_tags_pre[:]
 
@@ -20,10 +21,11 @@ class UniversalDependencyModel:
     np_relation_nmod = 'nmod'
     np_relation_case = 'case'
     np_relation_obl = 'obl'
+    np_relation_mwe = ['compound', 'fixed', 'flat']
 
-    np_relation_child = ['nmod', 'compound', 'fixed', 'flat', 'conj']
+    np_relation_child = ['nmod', 'conj']
 
-    np_strip_symbols = [',']  # [',', ')', '(', '-', '"', ':', '»', '«', '–']
+    np_strip_symbols = [',', 'і', 'та', 'а', '-', '–']  # [',', ')', '(', '-', '"', ':', '»', '«', '–']
     np_forbidden_child_symbols = []  # [',', ')', '(', ':']
 
     def __init__(self, path):
@@ -32,6 +34,7 @@ class UniversalDependencyModel:
         self.np_simple_tags.extend(['DET', 'PRON', 'PUNCT', 'SYM'])
         self.np_allowed_tags = self.np_simple_tags[:]
         self.np_allowed_tags.extend(self.np_head_tags)
+        self.np_relation_child.extend(self.np_relation_mwe)
         if not self.model:
             raise Exception("Cannot load model by the given path: %s" % path)
 
@@ -157,8 +160,8 @@ class UniversalDependencyModel:
                 # Sort aligned group
                 group_aligned.sort()
 
-                # # Remove comma at the start and end of sequence
-                # self.np_strip(group_aligned, 'form', self.np_strip_symbols, s.words)
+                # Remove comma at the start and end of sequence
+                self.np_strip(group_aligned, 'form', self.np_strip_symbols, s.words)
                 #
                 # # Remove prepositions from the start/end of phrase
                 # self.np_strip(group_aligned, 'upostag', self.np_optional_tags, s.words)
@@ -263,9 +266,30 @@ class UniversalDependencyModel:
             if u_pos_tag == self.np_verb_tag and self.fetch_morphological_feature(word.feats, 'VerbForm') != ['Inf']:
                 new_head_id = None
 
+            # if deprel in self.np_relation_mwe:
+            #     new_head_id = None
+
+            if u_pos_tag == 'ADV' and deprel == 'discourse':
+                new_head_id = None
+
+            if u_pos_tag == 'ADJ' and token_id > word.head:
+                new_head_id = None
+
+            if u_pos_tag == 'PUNCT':
+                punct_type = self.fetch_morphological_feature(word.feats, 'PunctType')
+                if len(punct_type) > 0 and punct_type[0] in ['Quot', 'Hyph']:
+                    new_head_id = head_id
+                else:
+                    new_head_id = None
+
         # Separately we analyze the noun and proper name
         if u_pos_tag in self.np_head_tags:
             new_head_id = token_id
+
+            special_deprel = ['obl', 'nsubj', 'obj']
+
+            if u_pos_tag == self.np_det_tag and (deprel not in special_deprel or len(word.children) == 0):
+                new_head_id = head_id
 
             is_object = True
             # If it is necessary to add the current token to another group
@@ -294,29 +318,43 @@ class UniversalDependencyModel:
                         token_case = self.fetch_morphological_feature(word.feats, 'Case')
                         head_case = self.fetch_morphological_feature(words[head_id].feats, 'Case')
 
+                        pos_tag_delimiters = ['ADP', 'AUX', 'PUNCT']
+
+                        if words[word.head].deprel in special_deprel:
+                            i = head_id + 1
+                            while i < token_id:
+                                if words[i].upostag in pos_tag_delimiters and words[word.head].upostag != self.np_det_tag:
+                                    is_allowed_to_inherit = False
+                                    punct_type = self.fetch_morphological_feature(words[i].feats, 'PunctType')
+                                    if len(punct_type) > 0 and punct_type[0] in ['Hyph', 'Quot']:
+                                        is_allowed_to_inherit = True
+                                        break
+                                    break
+                                i += 1
+
                         # Cannot connect dative Case if the parent has another
-                        # if token_case != head_case and token_case == ['Dat']:
-                        #     is_allowed_to_inherit = False
+                        if token_case != head_case and token_case == ['Loc']:
+                            is_allowed_to_inherit = False
 
                         # For nmod relation check if the Case morphological feature is different for objects
                         # Also allow inheritance of objects which are located near each other
-                        if deprel == self.np_relation_nmod:
-
-                            if words[head_id].deprel == 'nsubj' and abs(head_id - token_id) > 1:
-                                is_allowed_to_inherit = False
-
-                            # if token_case == 'Nom' and u_pos_tag == self.np_noun_tag and \
-                            #         words[head_id].upostag == self.np_noun_tag:
-                            #     is_allowed_to_inherit = False
-                            #
-
-                            if words[head_id].deprel == self.np_relation_nmod:
-                                i = head_id + 1
-                                while i < token_id:
-                                    if (not (words[i].upostag in self.np_head_tags)) or words[i].deprel != self.np_relation_nmod:
-                                        is_allowed_to_inherit = False
-                                        break
-                                    i += 1
+                        # if deprel == self.np_relation_nmod:
+                        #
+                        #     if words[head_id].deprel == 'nsubj' and abs(head_id - token_id) > 1:
+                        #         is_allowed_to_inherit = False
+                        #
+                        #     if token_case == 'Nom' and u_pos_tag == self.np_noun_tag and \
+                        #             words[head_id].upostag == self.np_noun_tag:
+                        #         is_allowed_to_inherit = False
+                        #
+                        #
+                        #     if words[head_id].deprel == self.np_relation_nmod:
+                        #         i = head_id + 1
+                        #         while i < token_id:
+                        #             if (not (words[i].upostag in self.np_head_tags)) or words[i].deprel != self.np_relation_nmod:
+                        #                 is_allowed_to_inherit = False
+                        #                 break
+                        #             i += 1
 
                     if is_allowed_to_inherit:
                         new_head_id = head_id

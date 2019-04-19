@@ -31,6 +31,8 @@ class NounPhrases:
 
         # Group every token by document
         for token in tokens:
+            # if token.DocumentID != 'df5ee091-b8ad-48d8-a00c-c6512f7a1114':
+            #     continue
             if not (token.DocumentID in documents):
                 # if len(documents.keys()) > 4:
                 #     break
@@ -41,20 +43,26 @@ class NounPhrases:
 
     @staticmethod
     def evaluate_precision(true_positives, false_positives):
+        if true_positives + false_positives == 0:
+            return 0
         return true_positives / (true_positives + false_positives)
 
     @staticmethod
     def evaluate_recall(true_positives, false_negatives):
+        if true_positives + false_negatives == 0:
+            return 0
         return true_positives / (true_positives + false_negatives)
 
     @staticmethod
     def evaluate_f1(precision, recall):
+        if precision + recall == 0:
+            return 0
         return 2 * precision * recall / (precision + recall)
 
-    def print_results(self, true_positives, false_positives, false_negatives):
-        precision = self.evaluate_precision(true_positives, false_positives)
-        recall = self.evaluate_recall(true_positives, false_negatives)
-        f1 = self.evaluate_f1(precision, recall)
+    def print_results(self, precision, recall, f1, total):
+        precision = precision / total
+        recall = recall / total
+        f1 = f1 / total
         print("Precision: {0}".format(precision))
         print("Recall: {0}".format(recall))
         print("F1: {0}".format(f1))
@@ -62,16 +70,24 @@ class NounPhrases:
     # Get metrics to estimate accuracy
     def get_metrics(self, without_ner=False, without_ud_parser=False):
 
-        # Init all metrics
-        true_positives_exact = 0
-        false_positives_exact = 0
-        false_negatives_exact = 0
-        true_positive_partial = 0
-        false_positives_partial = 0
-        false_negatives_partial = 0
+        precision_total_exact = 0
+        recall_total_exact = 0
+        f1_total_exact = 0
+
+        precision_total_partial = 0
+        recall_total_partial = 0
+        f1_total_partial = 0
 
         # Loop through each document
         for document_id in self.documents:
+
+            # Init all metrics
+            true_positives_exact = 0
+            false_positives_exact = 0
+            false_negatives_exact = 0
+            true_positive_partial = 0
+            false_positives_partial = 0
+            false_negatives_partial = 0
 
             tokens_gold = self.documents[document_id]
             # print(document_id)
@@ -186,11 +202,26 @@ class NounPhrases:
                     if not (coreference_group_id in seen_partial):
                         false_negatives_partial += 1
 
+            precision = self.evaluate_precision(true_positives_exact, false_positives_exact)
+            recall = self.evaluate_recall(true_positives_exact, false_negatives_exact)
+            precision_total_exact += precision
+            recall_total_exact += recall
+            f1_total_exact += self.evaluate_f1(precision, recall)
+            # print("F: {0}, document id: {1}".format(self.evaluate_f1(precision, recall), document_id))
+
+            precision = self.evaluate_precision(true_positive_partial, false_positives_partial)
+            recall = self.evaluate_recall(true_positive_partial, false_negatives_partial)
+            precision_total_partial += precision
+            recall_total_partial += recall
+            f1_total_partial += self.evaluate_f1(precision, recall)
+
+        total_length = len(self.documents.keys())
+
         print("Exact data")
-        self.print_results(true_positives_exact, false_positives_exact, false_negatives_exact)
+        self.print_results(precision_total_exact, recall_total_exact, f1_total_exact, total_length)
         print("")
         print("Partial data")
-        self.print_results(true_positive_partial, false_positives_partial, false_negatives_partial)
+        self.print_results(precision_total_partial, recall_total_partial, f1_total_partial, total_length)
 
 
 np = NounPhrases()
